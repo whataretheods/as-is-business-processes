@@ -219,4 +219,4 @@ def download_uniques_list():
         return jsonify({'message': 'An error occurred while downloading the uniques list.', 'error': str(e)}), 500
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5001)
+    app.run(host='0.0.0.0', port=5001)

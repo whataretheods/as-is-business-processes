@@ -43,7 +43,7 @@ const FileUpload = () => {
   
     try {
       const token = localStorage.getItem('token');
-      const response = await axios.post('http://localhost:5001/process_spreadsheets', formData, {
+      const response = await axios.post(`${process.env.REACT_APP_API_URL}/process_spreadsheets`, formData, {
         headers: {
           'Authorization': `Bearer ${token}`
         }

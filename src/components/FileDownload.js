@@ -5,7 +5,7 @@ const FileDownload = () => {
   const handleDownload = async () => {
     try {
       const token = localStorage.getItem('token');
-      const response = await axios.get('http://localhost:5001/download_uniques_list', {
+      const response = await axios.get(`${process.env.REACT_APP_API_URL}/download_uniques_list`, {
         headers: {
           'Authorization': `Bearer ${token}`
         },
