@@ -24,6 +24,12 @@
   color: white;
 }
 
+.app-container {
+  display: flex;
+  flex-direction: row;
+  min-height: 100vh; /* Ensure full vertical height */
+}
+
 .App-link {
   color: #61dafb;
 }
@@ -37,123 +43,141 @@
   }
 }
 
-/* Sidebar styles */
+.navigation {
+  width: 250px; /* Adjust based on your navigation width */
+  flex-shrink: 0; /* Prevents the navigation from shrinking */
+  /* Your existing styles for background, padding, etc. */
+}
+
 .sidebar {
-  position: fixed;
-  top: 0;
-  left: 0;
-  bottom: 0;
-  width: 250px;
-  background-color: #23395B;
-  color: white;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  background-color: #1a1a1a; /* Replace with actual color from mockup */
+  height: 100%;
+  padding: 20px; /* Adjust as needed */
+  position: fixed; /* Ensure it stays in place on scroll */
+  transition: background-color 0.3s; /* Smooth background color transition */
 }
 
 .sidebar a {
-  display: block;
-  padding: 10px 20px;
-  text-decoration: none;
-  color: white;
+  padding: 10px; /* Increase clickable area and space */
+  display: block; /* Make each link full width for padding to take effect */
+  color: white; /* Text color */
+  text-decoration: none; /* Remove underline */
+  margin-bottom: 5px; /* Space between links */
 }
 
-.sidebar a:hover, .sidebar a:focus {
-  background-color: #1A2930;
+.sidebar a:hover {
+  background-color: #333; /* Replace with actual color from mockup */
+}
+
+.sidebar-links a {
+  padding: 10px;
+  display: block;
+  color: white;
+  text-decoration: none;
+  margin-bottom: 5px;
+}
+
+.sidebar-links a:hover {
+  background-color: #333; /* Adjust hover color as needed */
 }
 
 .logout-bottom {
-  position: absolute;
-  bottom: 0;
-  width: 100%;
-  padding: 10px 20px;
-  border-top: 1px solid #FFF;
-}
-
-/* Main content styles */
-.main-content {
-  margin-left: 250px;
-  padding: 20px;
-  flex: 1;
-}
-
-.step-container {
-  background-color: #FFF;
-  border-radius: 15px;
-  box-shadow: 0 0 10px rgba(0,0,0,0.2);
-  padding: 20px;
-  margin-bottom: 20px;
-}
-
-.step-title {
-  font-size: 20px;
-  font-weight: bold;
-  margin-bottom: 20px;
-  color: #23395B;
-}
-
-/* File input and list styles */
-.dropzone {
-  border: 2px dashed #ccc;
-  padding: 20px;
+  margin-top: auto; /*pushes to the bottom */
+  cursor: pointer;
+  color: white;
   text-align: center;
-}
-
-.file-list {
-  margin-top: 20px;
-}
-
-.file-item {
-  margin-bottom: 10px;
-}
-
-input[type='file'] {
-  margin-bottom: 20px;
-}
-
-input[type='text'] {
-  width: calc(50% - 10px);
-  margin-right: 20px;
-}
-
-input, button {
   padding: 10px;
+  margin-bottom: 100px;
+}
+
+/* Main Content */
+.main-content {
+  flex-grow: 1; /* Takes up the remaining space */
+  padding: 30px; /* Adjust as needed */
+}
+
+/* Drop Zone style */
+.dropzone {
+  border: 2px dashed #999; /* Replace with actual color from mockup */
+  padding: 20px;
+  margin-bottom: 20px; /* Separate from other elements */
+}
+
+.dropzone:hover {
+  background-color: #f5f5f5; /* Light grey to indicate interactivity, replace with actual color from mockup */
+}
+
+/* Input fields and buttons */
+
+input[type="text"],
+input[type="file"] {
+  margin-right: 10px; /* Space between inputs */
+  margin-top: 10px;
   margin-bottom: 10px;
-  border: 1px solid #ccc;
-  border-radius: 4px;
+  padding: 2px;
 }
 
 button {
-  background-color: #23395B;
+  background-color: #007bff; /* Bootstrap primary button color for example, replace with actual color from mockup */
   color: white;
-  cursor: pointer;
+  padding: 10px 15px;
   border: none;
+  border-radius: 5px;
+  margin: 10px; /* Space between buttons */
+  cursor: pointer; /* Indicate it's clickable */
 }
 
 button:hover {
-  background-color: #1A2930;
+  background-color: #0056b3; /* Darken on hover, replace with actual color from mockup */
 }
 
-/* Result container styles */
-.result-container {
+/* Step Containers */
+
+.step-container {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); /* Subtle shadow, adjust as needed */
+  border-radius: 10px; /* Rounded corners */
+  margin: 20px 30px; /* Top and bottom margin */
   padding: 20px;
-  background-color: #f0f0f0;
-  border-radius: 15px;
+  min-height: 250px;
+  max-width: 700px;
 }
 
-/* Responsive styles */
+/* Headers and Style */
+
+.step-title {
+  font-weight: bold;
+  background-color: #e9ecef; /* Bootstrap light grey for example, replace with actual color from mockup */
+  padding: 10px;
+  border-radius: 5px; /* If the headers have separate boxes */
+  margin: -20px -20px 20px -20px; /* Align with the step-container padding */
+}
+
+/* Responsive Design */
+
 @media (max-width: 768px) {
   .sidebar {
-    width: 80px;
+    width: 100%; /* Full width on small screens */
+    max-width: 180px;
+    position: static; /* Stack on top instead of fixed */
   }
-  
+
+  .navigation {
+    max-width: 200px;
+    position: static;
+  }
+
   .main-content {
-    margin-left: 80px;
+    padding: 25px; /* Adjust padding on smaller screens */
   }
 
-  .hamburger {
-    display: block;
-  }
-
-  input[type='text'] {
-    width: calc(100% - 20px);
-    margin-right: 0;
-  }
+  /* Other responsive adjustments as needed */
 }
+
+
+

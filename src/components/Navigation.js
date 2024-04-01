@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { useNavigate } from 'react-router-dom';
 
-const Navigation = ({ isOpen, setIsOpen }) => {
+const Navigation = () => {
   const navigate = useNavigate();
 
   const handleLogout = () => {
@@ -10,11 +10,13 @@ const Navigation = ({ isOpen, setIsOpen }) => {
   };
 
   return (
-    <div className={`sidebar ${isOpen ? 'open' : ''}`}>
-      <a href="#cleanup" onClick={() => setIsOpen(false)}>Audantic Data Cleanup</a>
-      <a href="#logs" onClick={() => setIsOpen(false)}>User Logs</a>
-      <a href="#manage" onClick={() => setIsOpen(false)}>Manage Users</a>
-      <a href="#download" onClick={() => setIsOpen(false)}>Download Files</a>
+    <div className="sidebar">
+      <div className="sidebar-links">
+        <a href="#cleanup">Audantic Data Cleanup</a>
+        <a href="#logs">User Logs</a>
+        <a href="#manage">Manage Users</a>
+        <a href="#download">Download Files</a>
+      </div>
       <div className="logout-bottom" onClick={handleLogout}>Log Out</div>
     </div>
   );

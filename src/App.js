@@ -1,24 +1,35 @@
-import React, {useState } from 'react';
+import React, {useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import Login from './components/Login';
 import FileUpload from './components/FileUpload';
-
+import Navigation from './components/Navigation';
+import './App.css';
 
 const App = () => {
-  const token = localStorage.getItem('token');
-  const [isOpen, setIsOpen] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+
+  useEffect(() => {
+    // This effect runs once on mount to check authentication status
+    const token = localStorage.getItem('token');
+    setIsAuthenticated(!!token);
+  }, []);
 
   return (
-    <Router>
-      <Routes>
-        <Route path="/login" element={<Login />} />
-        <Route 
-          path="/upload" 
-          element={token ? <FileUpload isOpen={isOpen} setIsOpen={setIsOpen} /> : <Navigate to="/login" replace />} 
-        />
-        <Route path="*" element={<Navigate to="/login" replace />} />
-      </Routes>
-    </Router>
+    <div className="app-container">
+      <Router>
+        {isAuthenticated && <div className="navigation"><Navigation /></div>}
+        <div className="main-content">
+          <Routes>
+            <Route path="/login" element={<Login setAuthenticated={setIsAuthenticated} />} />
+            <Route 
+              path="/upload" 
+              element={isAuthenticated ? <FileUpload /> : <Navigate to="/login" />} 
+            />
+            <Route path="*" element={<Navigate to={isAuthenticated ? "/upload" : "/login"} />} />
+          </Routes>
+        </div>
+      </Router>
+    </div>
   );
 };
 

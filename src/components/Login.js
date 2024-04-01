@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 
-const Login = () => {
+const Login = ({ setAuthenticated }) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const navigate = useNavigate();
@@ -14,9 +14,11 @@ const Login = () => {
       const response = await axios.post(`${process.env.REACT_APP_API_URL}/login`, { username, password });
       const token = response.data.token;
       localStorage.setItem('token', token);
+      setAuthenticated(true);
       navigate('/upload');
     } catch (error) {
       console.error('Login error:', error);
+      setAuthenticated(false);
       if (error.response && error.response.status === 401) {
         alert('Invalid username or password. Please try again.');
       } else {
@@ -47,7 +49,7 @@ const Login = () => {
             onChange={(e) => setPassword(e.target.value)}
           />
         </div>
-        <button type="submit">Login</button>
+        <button type="submit" className="styled-button">Login</button>
       </form>
     </div>
   );

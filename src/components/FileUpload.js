@@ -3,7 +3,7 @@ import axios from 'axios';
 import Navigation from './Navigation';
 import FileDownload from './FileDownload';
 
-const FileUpload = ({ isOpen, setIsOpen }) => {
+const FileUpload = () => {
   const [files, setFiles] = useState([]);
   const [sourceName, setSourceName] = useState('');
   const [listName, setListName] = useState('');
@@ -77,57 +77,59 @@ const FileUpload = ({ isOpen, setIsOpen }) => {
 
   return (
     <div className="file-upload-container">
-      <Navigation isOpen={isOpen} setIsOpen={setIsOpen} handleLogout={handleLogout} />
       <div className="main-content">
         <div className="step-container">
           <h2 className="step-title">Step 1: Format Data and Get Unique Rows</h2>
           <div
-            ref={dropzoneRef}
             onDragOver={handleDragOver}
             onDrop={handleDrop}
             className="dropzone"
           >
+          <label className="styled-input"><p>Drag and Drop files here</p></label>
             <input type="file" multiple onChange={handleFileChange} />
             <div className="file-list">
               {files.map((file, index) => (
                 <div key={index} className="file-item">
                   {file.name}
-                  <button onClick={() => handleRemoveFile(index)}>Remove</button>
+                  <button onClick={() => handleRemoveFile(index)} className="styled-button">Remove</button>
                 </div>
               ))}
             </div>
-            <label htmlFor="sourceName">Source Name:</label>
+          </div>
+          <div className="inputs-container">
             <input
               type="text"
               id="sourceName"
+              placeholder="Source Name..."
               value={sourceName}
               onChange={(e) => setSourceName(e.target.value)}
+              className="styled-input"
             />
-            <label htmlFor="listName">List Name:</label>
             <input
               type="text"
               id="listName"
+              placeholder="List Name..."
               value={listName}
               onChange={(e) => setListName(e.target.value)}
+              className="styled-input"
             />
-            <button onClick={handleSubmit}>Process Spreadsheets</button>
+            <button onClick={handleSubmit} className="styled-button">Process Spreadsheets</button>
+            {result && (
+              <div className="result-container">
+                <h3>Processing Result:</h3>
+                <p>Unique Count: {result.unique_count}</p>
+                <p>Message: {result.message}</p>
+                <FileDownload /> {/* This button will only appear if there is a result */}
+              </div>
+            )}
           </div>
         </div>
-        {result && (
-          <div className="result-container">
-            <h3>Processing Result:</h3>
-            <p>Unique Count: {result.unique_count}</p>
-            <p>Message: {result.message}</p>
-            <FileDownload /> {/* Presuming you have a component for this */}
-          </div>
-        )}
         <div className="step-container">
           <h2 className="step-title">Step 2: Format Skiptraced Data and Add to Master List</h2>
           {/* Placeholder for future Step 2 content */}
         </div>
-      </div>
+      </div> 
     </div>
   );
-};
-
+}
 export default FileUpload;

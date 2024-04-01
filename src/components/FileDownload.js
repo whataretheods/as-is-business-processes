@@ -27,7 +27,7 @@ const FileDownload = () => {
 
   return (
     <div>
-      <button onClick={handleDownload}>Download Uniques List</button>
+      <button onClick={handleDownload} className="styled-button">Download Uniques List</button>
     </div>
   );
 };
