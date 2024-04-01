@@ -1,4 +1,4 @@
-import React from 'react';
+import React, {useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import Login from './components/Login';
 import FileUpload from './components/FileUpload';
@@ -6,6 +6,7 @@ import FileUpload from './components/FileUpload';
 
 const App = () => {
   const token = localStorage.getItem('token');
+  const [isOpen, setIsOpen] = useState(false);
 
   return (
     <Router>
@@ -13,7 +14,7 @@ const App = () => {
         <Route path="/login" element={<Login />} />
         <Route 
           path="/upload" 
-          element={token ? <FileUpload /> : <Navigate to="/login" replace />} 
+          element={token ? <FileUpload isOpen={isOpen} setIsOpen={setIsOpen} /> : <Navigate to="/login" replace />} 
         />
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>

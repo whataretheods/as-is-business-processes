@@ -3,9 +3,7 @@ import axios from 'axios';
 import Navigation from './Navigation';
 import FileDownload from './FileDownload';
 
-
-
-const FileUpload = () => {
+const FileUpload = ({ isOpen, setIsOpen }) => {
   const [files, setFiles] = useState([]);
   const [sourceName, setSourceName] = useState('');
   const [listName, setListName] = useState('');
@@ -14,6 +12,12 @@ const FileUpload = () => {
 
   const handleFileChange = (e) => {
     setFiles(Array.from(e.target.files));
+  };
+
+  const handleLogout = () => {
+    // Remove the token or user session
+    localStorage.removeItem('token');
+    // Redirect to the login page or perform other cleanup
   };
 
   const handleDragOver = (e) => {
@@ -72,56 +76,56 @@ const FileUpload = () => {
   };
 
   return (
-    <div>
-      <Navigation />
-      <form onSubmit={handleSubmit}>
+    <div className="file-upload-container">
+      <Navigation isOpen={isOpen} setIsOpen={setIsOpen} handleLogout={handleLogout} />
+      <div className="main-content">
+        <div className="step-container">
+          <h2 className="step-title">Step 1: Format Data and Get Unique Rows</h2>
           <div
             ref={dropzoneRef}
             onDragOver={handleDragOver}
             onDrop={handleDrop}
-            style={{ border: '2px dashed #ccc', padding: '20px', textAlign: 'center' }}
+            className="dropzone"
           >
-          <p>Drag and drop files here or click to select files</p>
-          <input type="file" multiple onChange={handleFileChange} />
-          <div>
-            {/* Display file names here */}
-            {files.map((file, index) => (
-              <div key={index}>
-                {file.name}
-                <button type="button" onClick={() => handleRemoveFile(index)}>Remove</button>
-              </div>
-            ))}
+            <input type="file" multiple onChange={handleFileChange} />
+            <div className="file-list">
+              {files.map((file, index) => (
+                <div key={index} className="file-item">
+                  {file.name}
+                  <button onClick={() => handleRemoveFile(index)}>Remove</button>
+                </div>
+              ))}
+            </div>
+            <label htmlFor="sourceName">Source Name:</label>
+            <input
+              type="text"
+              id="sourceName"
+              value={sourceName}
+              onChange={(e) => setSourceName(e.target.value)}
+            />
+            <label htmlFor="listName">List Name:</label>
+            <input
+              type="text"
+              id="listName"
+              value={listName}
+              onChange={(e) => setListName(e.target.value)}
+            />
+            <button onClick={handleSubmit}>Process Spreadsheets</button>
           </div>
         </div>
-
-        <div>
-          <label htmlFor="sourceName">Source Name:</label>
-          <input
-            type="text"
-            id="sourceName"
-            value={sourceName}
-            onChange={(e) => setSourceName(e.target.value)}
-          />
+        {result && (
+          <div className="result-container">
+            <h3>Processing Result:</h3>
+            <p>Unique Count: {result.unique_count}</p>
+            <p>Message: {result.message}</p>
+            <FileDownload /> {/* Presuming you have a component for this */}
+          </div>
+        )}
+        <div className="step-container">
+          <h2 className="step-title">Step 2: Format Skiptraced Data and Add to Master List</h2>
+          {/* Placeholder for future Step 2 content */}
         </div>
-        <div>
-          <label htmlFor="listName">List Name:</label>
-          <input
-            type="text"
-            id="listName"
-            value={listName}
-            onChange={(e) => setListName(e.target.value)}
-          />
-        </div>
-        <button type="submit">Process Spreadsheets</button>
-      </form>
-      {result && (
-        <div>
-          <h3>Processing Result:</h3>
-          <p>Unique Count: {result.unique_count}</p>
-          <p>Message: {result.message}</p>
-          <FileDownload />
-        </div>
-      )}
+      </div>
     </div>
   );
 };
