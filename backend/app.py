@@ -6,6 +6,8 @@ import psycopg2
 import pandas as pd
 from datetime import datetime
 from database import get_db_connection
+import tempfile
+import csv
 import io
 from dotenv import load_dotenv
 import os
@@ -204,16 +206,21 @@ def process_spreadsheets():
 
 def download_uniques_list():
     try:
-        if uniques_list_df is not None:
-            # Create a BytesIO object to store the CSV data
-            csv_buffer = io.BytesIO()
-            uniques_list_df.to_csv(csv_buffer, index=False)
-            csv_buffer.seek(0)
+        # Fetch the data from the uniques_list table
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM uniques_list")
+        data = cur.fetchall()
+        cur.close()
+        conn.close()
 
-            # Return the CSV file as a download attachment
-            return send_file(csv_buffer, mimetype='text/csv', as_attachment=True, attachment_filename='uniques_list.csv')
-        else:
-            return jsonify({'message': 'No uniques list available.'}), 404
+        # Create a temporary CSV file
+        with tempfile.NamedTemporaryFile(mode='w', delete=False) as temp_file:
+            writer = csv.writer(temp_file)
+            writer.writerow([desc[0] for desc in cur.description]) #Write header row
+            writer.writerows(data)
+            temp_file_path = temp_file.name
+        return send_file(temp_file_path, as_attachment=True, attachment_filename='uniques_list.csv')
 
     except Exception as e:
         return jsonify({'message': 'An error occurred while downloading the uniques list.', 'error': str(e)}), 500
