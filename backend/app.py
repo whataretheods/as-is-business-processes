@@ -14,7 +14,7 @@ import os
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "*"}})
+CORS(app, resources={r"/*": {"origins": os.getenv('APP_FRONT_END_URL')}})
 
 # Configure JWT
 app.config['JWT_SECRET_KEY'] = os.getenv('JWT_KEY')  # Replace with your own secret key
@@ -219,4 +219,4 @@ def download_uniques_list():
         return jsonify({'message': 'An error occurred while downloading the uniques list.', 'error': str(e)}), 500
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5001)
+    app.run(host='0.0.0.0', port=5000)
