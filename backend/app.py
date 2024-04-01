@@ -94,19 +94,17 @@ def process_spreadsheets():
  
         for col in smallint_columns:
             if col in df.columns:
-                df[col] = df[col].astype('Int64')
+                df[col] = df[col].astype(pd.Int64Dtype()) #converts the column values to integers and invalid or missing values to NaN
                 max_val = df[col].max()
                 min_val = df[col].min()
                 print(f"Column '{col}' max value: {max_val}")
                 print(f"Column '{col}' min value: {min_val}")
-                if max_val > 32767 or min_val < -32768:
-                    print(f"Value out of range for smallint in column: {col}")        
 
         integer_columns = ['low_property_avm','final_property_avm','high_property_avm','lot_size','sqft','sale_price','mortgage_past_due_amount','mortgage_unpaid_balance_amount']
         
         for col in integer_columns:
             if col in df.columns:
-                df[col] = df[col].astype('Int64')
+                df[col] = df[col].astype(pd.Int64Dtype()) #converts the column values to integers and invalid or missing values to NaN
 
         date_columns = ['prediction_date', 'last_sale_date', 'first_seen', 'last_updated','invol_lien_first_seen','invol_lien_last_updated',
             'phantom_first_seen','phantom_last_updated','mortgage_original_due_date','mortgage_default_date',
@@ -220,9 +218,10 @@ def download_uniques_list():
             writer.writerow([desc[0] for desc in cur.description]) #Write header row
             writer.writerows(data)
             temp_file_path = temp_file.name
-        return send_file(temp_file_path, as_attachment=True, attachment_filename='uniques_list.csv')
+        return send_file(temp_file_path, as_attachment=True, download_name='uniques_list.csv')
 
     except Exception as e:
+        print(f"Error downloading uniques list: {str(e)}")
         return jsonify({'message': 'An error occurred while downloading the uniques list.', 'error': str(e)}), 500
 
 if __name__ == '__main__':
