@@ -4,7 +4,7 @@ from flask_jwt_extended import JWTManager, jwt_required, create_access_token
 import bcrypt
 import psycopg2
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 from database import get_db_connection
 import tempfile
 import csv
@@ -20,13 +20,33 @@ CORS(app, resources={r"/*": {"origins": os.getenv('APP_FRONT_END_URL')}})
 
 # Configure JWT
 app.config['JWT_SECRET_KEY'] = os.getenv('JWT_KEY')  # Replace with your own secret key
+app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=2) # Set the token expiration time
 jwt = JWTManager(app)
 
+#This function checks the token's validity against the database
+@jwt.user_lookup_loader
+def custom_user_loader_callback(identity):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM users WHERE username = %s", (identity,))
+    user = cur.fetchone()
+    cur.close()
+    conn.close()
+
+    if user:
+        token = user[3] # Make sure token is the 4th column of your table
+        token_expiration = user[4] #Make sure token_expiration is the 5th column of your table
+        if token and token_expiration and token_expiration > datetime.utcnow():
+            return {'username': identity}
+    return None
+
+'''
 # Dummy user for demonstration purposes
 users = {
     'admin': {'password': '$2a$12$nDec2tkyQ3IAcw8iNqxwD.8jX3lJoT8errspcsD7gSkTn5g3.p532'},  # Password: 'password'
     'testuser': {'password': '$2b$12$testusertestusertestus.UjH7pAoLdqkpnD8Bx1qYd/djECJ5i'}  # Password: 'testpassword'
 }
+'''
 
 @app.route('/login', methods=['POST'])
 def login():
@@ -34,12 +54,29 @@ def login():
     password = request.json.get('password', None)
     print(f"Received login request with username: {username} and password: {password}")
 
-    if username in users and bcrypt.checkpw(password.encode('utf-8'), users[username]['password'].encode('utf-8')):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM users WHERE username = %s", (username,))
+    user = cur.fetchone()
+
+    if user and bcrypt.checkpw(password.encode('utf-8'), user[2].encode('utf-8')):
         access_token = create_access_token(identity=username)
+        token_expiration = datetime.utcnow() + app.config['JWT_ACCESS_TOKEN_EXPIRES']
+
+        cur.execute("UPDATE users SET token = %s, token_expiration = %s WHERE id = %s", (access_token, token_expiration, user[0]))
+
+        if cur.rowcount == 0: # Check to see if there is no token for the user, since the Update step above did not work.
+            cur.execute("INSERT INTO users (username, password, token, token_expiration) VALUES (%s, %s, %s, %s)", (username, user[2], access_token, token_expiration))
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
         return jsonify({'token': access_token}), 200
     else:
+        cur.close()
+        conn.close()
         return jsonify({'message': 'Invalid username or password'}), 401
-
 
 
 # Global variable to store the uniques_list DataFrame
