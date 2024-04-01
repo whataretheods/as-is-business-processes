@@ -1,6 +1,6 @@
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
-from flask_jwt_extended import JWTManager, jwt_required, create_access_token
+from flask_jwt_extended import JWTManager, jwt_required, create_access_token, get_jwt_identity
 import bcrypt
 import psycopg2
 import pandas as pd
@@ -25,7 +25,9 @@ jwt = JWTManager(app)
 
 #This function checks the token's validity against the database
 @jwt.user_lookup_loader
-def custom_user_loader_callback(identity):
+def custom_user_loader_callback(jwt_header, jwt_data):
+    identity = jwt_data["sub"]
+
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute("SELECT * FROM users WHERE username = %s", (identity,))
@@ -84,8 +86,10 @@ uniques_list_df = None
 
 @app.route('/process_spreadsheets', methods=['POST'])
 @jwt_required()
-
 def process_spreadsheets():
+    # Get the current user's ID
+    current_user_id = get_jwt_identity()
+
     print("Processing spreadsheets...")
     uploaded_files = request.files.getlist('files')
     source_name = request.form.get('source_name')
@@ -213,11 +217,17 @@ def process_spreadsheets():
                 AND my_master_list.phone1 IS NOT NULL
         )
         """
+
         cur.execute(unique_list_query)
 
-        # Store the uniques_list DataFrame in a global variable
+        # Store the uniques_list DataFrame
         global uniques_list_df
         uniques_list_df = pd.read_sql_query("SELECT * FROM uniques_list", conn)
+
+        json_data = uniques_list_df.to_json(orient = 'records')
+        binary_data = json_data.encode()
+
+        cur.execute("INSERT INTO processed_files (username, file_data) VALUES (%s, %s)", (current_user_id, binary_data))
 
         conn.commit()
         cur.close()
@@ -238,24 +248,38 @@ def process_spreadsheets():
 
 @app.route('/download_uniques_list', methods=['GET'])
 @jwt_required()
-
 def download_uniques_list():
     try:
+        # Get the current user's ID
+        current_user_id = get_jwt_identity()
+
         # Fetch the data from the uniques_list table
         conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute("SELECT * FROM uniques_list")
-        data = cur.fetchall()
+        cur.execute("""
+            SELECT file_data
+            FROM processed_files
+            WHERE username = %s
+            ORDER BY timestamp DESC
+            LIMIT 1
+        """, (current_user_id,))
+        result = cur.fetchone()
         cur.close()
         conn.close()
 
-        # Create a temporary CSV file
-        with tempfile.NamedTemporaryFile(mode='w', delete=False) as temp_file:
-            writer = csv.writer(temp_file)
-            writer.writerow([desc[0] for desc in cur.description]) #Write header row
-            writer.writerows(data)
-            temp_file_path = temp_file.name
-        return send_file(temp_file_path, as_attachment=True, download_name='uniques_list.csv')
+        if result:
+            file_data = result[0]
+            json_data = file_data.tobytes().decode() # convert data type from RDS (stored as bytea) to JSON
+            df = pd.read_json(json_data)
+
+            # Create a temporary file and write the DataFrame to it
+            with tempfile.NamedTemporaryFile(mode='w', delete=False) as temp_file:
+                df.to_csv(temp_file, index=False)
+                temp_file_path = temp_file.name
+
+            return send_file(temp_file_path, as_attachment=True, download_name='uniques_list.csv')
+        else:
+            return jsonify({'message': 'No processed file found for the user.'}), 404
 
     except Exception as e:
         print(f"Error downloading uniques list: {str(e)}")
