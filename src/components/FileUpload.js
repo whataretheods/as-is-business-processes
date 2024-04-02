@@ -9,6 +9,9 @@ const FileUpload = () => {
   const [listName, setListName] = useState('');
   const [result, setResult] = useState(null);
   const dropzoneRef = useRef(null);
+  const [skiptracedFiles, setSkiptracedFiles] = useState([]);
+  const [skiptracedDate, setSkiptracedDate] = useState('');
+  const [skiptracedResult, setSkiptracedResult] = useState(null);
 
   const handleFileChange = (e) => {
     setFiles(Array.from(e.target.files));
@@ -18,6 +21,52 @@ const FileUpload = () => {
     // Remove the token or user session
     localStorage.removeItem('token');
     // Redirect to the login page or perform other cleanup
+  };
+
+  const handleSkiptracedFileChange = (e) => {
+    const files = Array.from(e.target.files);
+    const updatedFiles = files.map((file) => ({
+      ...file,
+      rowCount: 0, // Initialize rowCount as 0
+    }));
+    setSkiptracedFiles((prevFiles) => [...prevFiles, ...updatedFiles]);
+
+    // Count the number of rows in each file
+    files.forEach((file) => {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const contents = event.target.result;
+        const rows = contents.split('\n').length - 1; // ignore header row
+        setSkiptracedFiles((prevfiles) => {
+          return prevFiles.map((prevFile) =>
+            prevFile === file ? { ...prevFile, rowCount: rows } : prevFile
+          );
+        });
+      };
+      reader.readAsText(file);
+    });
+  };
+
+  const handleSkiptracedSubmit = async () => {
+    // Prepare the data to send to the backend
+    const formData = new FormData();
+    skiptracedFiles.forEach((file) => {
+      formData.Data.append('files', file);
+    });
+    formData.append('skip_traced_date', skiptracedDate);
+
+    try {
+      const token = localStorage.getItem('token');
+      const response = await axios.post(`${process.env.REACT_APP_API_URL}/process_skiptraced`, formData, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      setSkiptracedResult(response.data);
+    } catch (error) {
+      console.error('Error processing skiptraced data:', error);
+      alert('An error occurred while processing the skiptraced data.');
+    }
   };
 
   const handleDragOver = (e) => {
@@ -126,7 +175,36 @@ const FileUpload = () => {
         </div>
         <div className="step-container">
           <h2 className="step-title">Step 2: Format Skiptraced Data and Add to Master List</h2>
-          {/* Placeholder for future Step 2 content */}
+          <div className="dropzone">
+            <label className="styled-input"><p>Drag and Drop files here</p></label>
+            <input type="file" multiple onChange={handleSkiptracedFileChange} />
+            <div className="file-list">
+              {skiptracedFiles.map((file, index) => (
+                <div key={index} className="file-item">
+                  {file.name} - Rows: {file.rowCount}
+                  <button onClick={() => handleRemoveSkiptracedfile(index)} className="styled-button">x</button>
+                </div>
+              ))}
+            </div>
+            <div className="inputs-container">
+              <input
+                type="text"
+                id="skiptracedDate"
+                placeholder="Skiptraced Date (MM/DD/YYYY)..."
+                value={skiptracedDate}
+                onChange={(e) => setSkiptracedDate(e.target.value)}
+                className="styled-input"
+              />
+              <button onClick={handleSkiptracedSubmit} className="styled-button">Process Skiptraced Data</button>
+              {skiptracedResult && (
+                <div className="result-container">
+                  <h3>Processing Result:</h3>
+                  <p>Standardization: {skiptracdedResult.standardization}</p>
+                  <p>Merge Status: {skiptracedResult.mergeStatus}</p>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       </div> 
     </div>

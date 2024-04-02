@@ -285,5 +285,139 @@ def download_uniques_list():
         print(f"Error downloading uniques list: {str(e)}")
         return jsonify({'message': 'An error occurred while downloading the uniques list.', 'error': str(e)}), 500
 
+
+@app.route('/process_skiptraced', methods=['POST'])
+@jwt_required()
+def process_skiptraced():
+    uploaded_files = request.files.getlist('files')
+    skip_traced_date = request.form.get('skip_traced_date')
+    upload_date = str(datetime.date.today())
+
+    if not uploaded_files:
+        return jsonify({'message': 'No files uploaded.'}), 400
+    
+    try:
+        processed_files = []
+
+        for file in uploaded_files:
+            df = pd.read_csv(file)
+            # Verify the number of columns is what we expect
+            num_col = len(df.columns)
+            if num_col != 91:
+                return jsonify({'message': f'Number of columns is not what we expect. Should be 91 but is {num_col}'}), 400
+            else:
+
+                # Modify column names
+                df.columns = [col.lower().replace(" ", "_").replace("%", "percent").replace("-", "") for col in df.columns]
+
+                # Column specific modifications
+                df.rename(columns={'full_address': 'full_skiptrace_address'}, inplace=True)
+                df.drop(columns=['has_duplicates'], inplace=True)
+
+                # Add new columns with specified values at the end
+                df["last_skiptraced_date"] = skip_traced_date
+                df["sql_last_update_date"] = upload_date
+                df["sql_added_date"] = upload_date
+
+                df.insert(df.columns.get_loc("list")+1, "original_name", "")
+
+                # Move specified owner-related columns
+                owner_columns = df[['owner_1_name', 'owner_1_first_name', 'owner_1_last_name', 'owner_2_name', 'owner_2_first_name', 'owner_2_last_name']]
+                df.drop(columns=owner_columns.columns, inplace=True)
+                insert_index = df.columns.get_loc('original_name') + 1
+                for col in owner_columns.columns:
+                    df.insert(insert_index, col, owner_columns[col])
+                    insert_index += 1
+
+                # Insert new columns
+                df.insert(df.columns.get_loc("owner_1_first_name")+1, 'owner_1_middle_name', '')
+                df.insert(df.columns.get_loc("owner_2_first_name")+1, 'owner_2_middle_name', '')
+
+                county_column = df.pop('county')
+                df.insert(df.columns.get_loc("owner_2_last_name")+1, 'county', county_column)
+                df.insert(df.columns.get_loc("county")+1, 'property_class', '')
+
+                property_info_columns = df.loc[:, 'dob':'sql_added_date']
+                df.drop(columns=property_info_columns.columns, inplace=True)
+                df = pd.concat([df.iloc[:, :df.columns.get_loc("property_class")+1], property_info_columns, df.iloc[:, df.columns.get_loc("property_class")+1:]], axis=1)
+
+                # Insert dispositions
+                df.insert(df.columns.get_loc("phone1")+1, "phone1_cc_disposition", "")
+                df.insert(df.columns.get_loc("phone1_cc_disposition")+1, "phone1_sms_disposition", "")
+                df.insert(df.columns.get_loc("phone2_company")+1, "phone2_cc_disposition", "")
+                df.insert(df.columns.get_loc("phone2_cc_disposition")+1, "phone2_sms_disposition", "")
+                df.insert(df.columns.get_loc("phone3_company")+1, "phone3_cc_disposition", "")
+                df.insert(df.columns.get_loc("phone3_cc_disposition")+1, "phone3_sms_disposition", "")
+
+                # Move owner address details
+                owner_columns = df[['owner_street_address', 'owner_city', 'owner_state', 'owner_zip_code']]
+                df.drop(columns=owner_columns.columns, inplace=True)
+                insert_index = df.columns.get_loc('sql_added_date') + 1
+                for col in owner_columns.columns:
+                    df.insert(insert_index, col, owner_columns[col])
+                    insert_index += 1
+
+                # Delete vacancy_description
+                df.drop(columns=['vacancy_description'], inplace=True)
+
+                # After all modifications, verify the number of columns again
+                if len(df.columns) != 102:
+                    return jsonify({'message': f'After modifications, the number of columns is not as expected: {len(df.columns)}'}), 400
+                else:
+                    processed_files.append(df)
+                
+                if not processed_files:
+                    return jsonify({'message': 'No valid files processed.'}), 400
+                
+                conn = get_db_connection()
+                cur = conn.cursor()
+
+                for df in processed_files:
+                    # Prepare the data for insertion
+                    columns = df.columns.tolist()
+
+                    # Merge the data with the my_master_list table
+                    merge_query = f"""
+                    INSERT INTO my_master_list ({','.join(columns)})
+                    SELECT {','.join(columns)}
+                    FROM (VALUES {','.join([str(tuple(row)) for row in df.itertuples(index=False)])}) AS new_data ({','.join(columns)})
+                    ON CONFLICT (property_street_address, property_city, owner_1_first_name, owner_1_last_name)
+                    DO UPDATE SET
+                        phone1 = COALESCE(NULLIF(my_master_list.phone1, ''), NULLIF(new_data.phone1, '')),
+                        phone2 = COALESCE(NULLIF(my_master_list.phone2, ''), NULLIF(new_data.phone2, '')),
+                        phone3 = COALESCE(NULLIF(my_master_list.phone3, ''), NULLIF(new_data.phone3, '')),
+                        email1 = COALESCE(NULLIF(my_master_list.email1, ''), NULLIF(new_data.email1, '')),
+                        email2 = COALESCE(NULLIF(my_master_list.email2, ''), NULLIF(new_data.email2, '')),
+                        last_skiptraced_date = NULLIF(new_data.last_skiptraced_date, ''),
+                        sql_last_update_date = new_data.sql_last_update_date;
+                    """
+
+                    try:
+                        cur.execute(merge_query)
+                    except psycopg2.errors.UniqueViolation:
+                        conn.rollback()
+                        print(f"Duplicate key violation encountered. Skipping the insertion of duplicate records.")
+                    except psycopg2.errors.InFailedSqlTransaction:
+                        conn.rollback()
+                        print(f"Transaction failed. Rolling back the changes.")
+                    except Exception as e:
+                        conn.rollback()
+                        print(f"An error occurred while merging the data: {str(e)}")
+                        raise
+                
+                conn.commit()
+                cur.close()
+                conn.close()
+
+                return jsonify({
+                    'message': 'Skiptraced data processed and merged successfully.',
+                    'standardization': 'Successful',
+                    'mergeStatus': 'Completed'
+                }), 200
+    except Exception as e:
+        print(f"An error occurred: {str(e)}")
+        return jsonify({'message': 'An error occurred while processing the skiptraced data.', 'error': str(e)}), 500
+
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
