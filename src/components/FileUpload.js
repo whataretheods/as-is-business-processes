@@ -91,7 +91,7 @@ const FileUpload = () => {
               {files.map((file, index) => (
                 <div key={index} className="file-item">
                   {file.name}
-                  <button onClick={() => handleRemoveFile(index)} className="styled-button">Remove</button>
+                  <button onClick={() => handleRemoveFile(index)} className="styled-button">x</button>
                 </div>
               ))}
             </div>

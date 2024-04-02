@@ -43,6 +43,51 @@
   }
 }
 
+.login-page {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+}
+
+.login-container {
+  width: 100%;
+  max-width: 400px;
+}
+
+.login-form {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  padding: 20px;
+  border-radius: 10px;
+  background-color: lightgray;
+}
+
+.form-group {
+  margin: 15px;
+}
+
+input[type="text"],
+input[type="username"] {
+  padding: 8px 8px 8px 15px;
+  margin-top: 5px;
+  border: 1px solid #ccc;
+  border-radius: 20px;
+  width: 100%; /* Makes input take the full width of the form */
+}
+
+input[type="text"],
+input[type="password"] {
+  padding: 8px 8px 8px 15px;
+  margin-top: 5px;
+  border: 1px solid #ccc;
+  border-radius: 20px;
+  width: 100%; /* Makes input take the full width of the form */
+}
+
 .navigation {
   width: 250px; /* Adjust based on your navigation width */
   flex-shrink: 0; /* Prevents the navigation from shrinking */
@@ -88,22 +133,27 @@
   margin-top: auto; /*pushes to the bottom */
   cursor: pointer;
   color: white;
-  text-align: center;
-  padding: 10px;
-  margin-bottom: 100px;
+  text-align: left;
+  padding: 19px;
+  margin-bottom: auto;
 }
 
 /* Main Content */
 .main-content {
   flex-grow: 1; /* Takes up the remaining space */
-  padding: 30px; /* Adjust as needed */
+  padding: 10px; /* Adjust as needed */
 }
 
 /* Drop Zone style */
 .dropzone {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
   border: 2px dashed #999; /* Replace with actual color from mockup */
-  padding: 20px;
-  margin-bottom: 20px; /* Separate from other elements */
+  padding: 10px;
+  margin-bottom: 5px; /* Separate from other elements */
+  border-radius: 20px;
 }
 
 .dropzone:hover {
@@ -112,12 +162,21 @@
 
 /* Input fields and buttons */
 
+.inputs-container {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 10px;
+  align-items: center;
+}
+
 input[type="text"],
 input[type="file"] {
-  margin-right: 10px; /* Space between inputs */
-  margin-top: 10px;
-  margin-bottom: 10px;
-  padding: 2px;
+  display: flex;
+  justify-content: space-between;
+  flex-direction: column;
+  max-width: 400px; /* Space between inputs */
+  margin-top: 20px;
 }
 
 button {
@@ -125,7 +184,7 @@ button {
   color: white;
   padding: 10px 15px;
   border: none;
-  border-radius: 5px;
+  border-radius: 15px;
   margin: 10px; /* Space between buttons */
   cursor: pointer; /* Indicate it's clickable */
 }
@@ -137,12 +196,10 @@ button:hover {
 /* Step Containers */
 
 .step-container {
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
+  text-align: center;
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); /* Subtle shadow, adjust as needed */
-  border-radius: 10px; /* Rounded corners */
-  margin: 20px 30px; /* Top and bottom margin */
+  border-radius: 20px; /* Rounded corners */
+  margin: 20px 30px 20px 20px; /* Top and bottom margin */
   padding: 20px;
   min-height: 250px;
   max-width: 700px;
@@ -152,9 +209,10 @@ button:hover {
 
 .step-title {
   font-weight: bold;
+  font-size: 100%;
   background-color: #e9ecef; /* Bootstrap light grey for example, replace with actual color from mockup */
   padding: 10px;
-  border-radius: 5px; /* If the headers have separate boxes */
+  border-radius: 20px 20px 0 0; /* If the headers have separate boxes */
   margin: -20px -20px 20px -20px; /* Align with the step-container padding */
 }
 
