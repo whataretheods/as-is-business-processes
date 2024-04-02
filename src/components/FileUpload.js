@@ -37,7 +37,7 @@ const FileUpload = () => {
       reader.onload = (event) => {
         const contents = event.target.result;
         const rows = contents.split('\n').length - 1; // ignore header row
-        setSkiptracedFiles((prevfiles) => {
+        setSkiptracedFiles((prevFiles) => {
           return prevFiles.map((prevFile) =>
             prevFile === file ? { ...prevFile, rowCount: rows } : prevFile
           );
@@ -46,7 +46,10 @@ const FileUpload = () => {
       reader.readAsText(file);
     });
   };
-
+  const handleRemoveSkiptracedFile = (index) => {
+    setSkiptracedFiles((currentFiles) => currentFiles.filter((_, i) => i !== index));
+  };
+ 
   const handleSkiptracedSubmit = async () => {
     // Prepare the data to send to the backend
     const formData = new FormData();
@@ -182,7 +185,7 @@ const FileUpload = () => {
               {skiptracedFiles.map((file, index) => (
                 <div key={index} className="file-item">
                   {file.name} - Rows: {file.rowCount}
-                  <button onClick={() => handleRemoveSkiptracedfile(index)} className="styled-button">x</button>
+                  <button onClick={() => handleRemoveSkiptracedFile(index)} className="styled-button">x</button>
                 </div>
               ))}
             </div>
@@ -199,7 +202,7 @@ const FileUpload = () => {
               {skiptracedResult && (
                 <div className="result-container">
                   <h3>Processing Result:</h3>
-                  <p>Standardization: {skiptracdedResult.standardization}</p>
+                  <p>Standardization: {skiptracedResult.standardization}</p>
                   <p>Merge Status: {skiptracedResult.mergeStatus}</p>
                 </div>
               )}
