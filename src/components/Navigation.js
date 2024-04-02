@@ -1,11 +1,12 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 
-const Navigation = () => {
+const Navigation = ({ setIsAuthenticated }) => {
   const navigate = useNavigate();
 
   const handleLogout = () => {
     localStorage.removeItem('token');
+    setIsAuthenticated(false); /* updates authentication status to false when user logs out */
     navigate('/login');
   };
 

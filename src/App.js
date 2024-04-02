@@ -17,7 +17,7 @@ const App = () => {
   return (
     <div className="app-container">
       <Router>
-        {isAuthenticated && <div className="navigation"><Navigation /></div>}
+        {isAuthenticated && <div className="navigation"><Navigation setIsAuthenticated={setIsAuthenticated} /></div>}
         <div className="main-content">
           <Routes>
             <Route path="/login" element={<Login setAuthenticated={setIsAuthenticated} />} />
