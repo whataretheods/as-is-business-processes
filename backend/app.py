@@ -4,7 +4,7 @@ from flask_jwt_extended import JWTManager, jwt_required, create_access_token, ge
 import bcrypt
 import psycopg2
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from database import get_db_connection
 import tempfile
 import csv
@@ -38,7 +38,11 @@ def custom_user_loader_callback(jwt_header, jwt_data):
     if user:
         token = user[3] # Make sure token is the 4th column of your table
         token_expiration = user[4] #Make sure token_expiration is the 5th column of your table
-        if token and token_expiration and token_expiration > datetime.utcnow():
+
+        if token_expiration:
+            token_expiration = token_expiration.replace(tzinfo=timezone.utc)
+
+        if token and token_expiration and token_expiration > datetime.now(timezone.utc):
             return {'username': identity}
     return None
 
@@ -291,7 +295,7 @@ def download_uniques_list():
 def process_skiptraced():
     uploaded_files = request.files.getlist('files')
     skip_traced_date = request.form.get('skip_traced_date')
-    upload_date = str(datetime.date.today())
+    upload_date = str(datetime.now().date())
 
     if not uploaded_files:
         return jsonify({'message': 'No files uploaded.'}), 400

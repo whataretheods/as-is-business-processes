@@ -23,29 +23,42 @@ const FileUpload = () => {
     // Redirect to the login page or perform other cleanup
   };
 
-  const handleSkiptracedFileChange = (e) => {
-    const files = Array.from(e.target.files);
-    const updatedFiles = files.map((file) => ({
-      ...file,
-      rowCount: 0, // Initialize rowCount as 0
-    }));
-    setSkiptracedFiles((prevFiles) => [...prevFiles, ...updatedFiles]);
 
-    // Count the number of rows in each file
-    files.forEach((file) => {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const contents = event.target.result;
-        const rows = contents.split('\n').length - 1; // ignore header row
-        setSkiptracedFiles((prevFiles) => {
-          return prevFiles.map((prevFile) =>
-            prevFile === file ? { ...prevFile, rowCount: rows } : prevFile
-          );
-        });
-      };
-      reader.readAsText(file);
+  // Count the number of rows in each file
+  const countRows = async (file): Promise<number> => {
+    return new Promise((resolve, reject) => {
+      try {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          const contents = event.target.result;
+          const rowCount = contents.split('\n');
+          resolve(rowCount.length);
+        };
+          
+        reader.readAsText(file);
+      } catch (error) {
+        reject(error);
+      }
     });
   };
+
+
+  const handleSkiptracedFileChange = async (e) => {
+    const selectedFiles = e.target.files;
+    if (selectedFiles) {
+      const filePromises = Array.from(selectedFiles).map(async (file) => {
+        const rowCount = await countRows(file);
+        return {
+          file,
+          rowCount,
+        };
+      });
+
+      const updatedFiles = await Promise.all(filePromises);
+      setSkiptracedFiles(updatedFiles);
+    }
+  };
+
   const handleRemoveSkiptracedFile = (index) => {
     setSkiptracedFiles((currentFiles) => currentFiles.filter((_, i) => i !== index));
   };
@@ -53,8 +66,9 @@ const FileUpload = () => {
   const handleSkiptracedSubmit = async () => {
     // Prepare the data to send to the backend
     const formData = new FormData();
+
     skiptracedFiles.forEach((file) => {
-      formData.Data.append('files', file);
+      formData.Data.append('files', file.file);
     });
     formData.append('skip_traced_date', skiptracedDate);
 
@@ -189,6 +203,7 @@ const FileUpload = () => {
                 </div>
               ))}
             </div>
+          </div>
             <div className="inputs-container">
               <input
                 type="text"
@@ -207,7 +222,6 @@ const FileUpload = () => {
                 </div>
               )}
             </div>
-          </div>
         </div>
       </div> 
     </div>
