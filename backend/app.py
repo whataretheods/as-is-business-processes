@@ -293,10 +293,11 @@ def download_uniques_list():
 @app.route('/process_skiptraced', methods=['POST'])
 @jwt_required()
 def process_skiptraced():
+    print("Skitrace sheet process initiated")
     uploaded_files = request.files.getlist('files')
     skip_traced_date = request.form.get('skip_traced_date')
     upload_date = str(datetime.now().date())
-
+    print(f"Uploaded files received {uploaded_files}, skiptraced date {skip_traced_date}")
     if not uploaded_files:
         return jsonify({'message': 'No files uploaded.'}), 400
     

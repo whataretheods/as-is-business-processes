@@ -42,36 +42,79 @@ const FileUpload = () => {
     });
   };
 
+  const handleSkiptraceDragOver = (second) => {
+    second.preventDefault();
+    second.stopPropagation();
+    second.dataTransfer.dropEffect = 'copy';
+  };
 
-  const handleSkiptracedFileChange = async (e) => {
-    const selectedFiles = e.target.files;
-    if (selectedFiles) {
-      const filePromises = Array.from(selectedFiles).map(async (file) => {
-        const rowCount = await countRows(file);
-        return {
-          file,
-          rowCount,
+  const handleSkiptraceDrop = async (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const droppedFiles = Array.from(event.dataTransfer.files);  
+    // Process each file to include rowCount and fileName similar to handleSkiptracedFileChange
+    const filePromises = droppedFiles.map(file => {
+        return new Promise((resolve, reject) => { 
+            const reader = new FileReader();
+            reader.onload = (readEvent) => {
+                const contents = readEvent.target.result;
+                const rows = contents.split('\n').length - 1; // Ignore header row
+                resolve({ file, rowCount: rows, fileName: file.name });
+            };
+            reader.onerror = reject;
+            reader.readAsText(file);
+        });
+    });
+
+    Promise.all(filePromises)
+        .then(updatedFiles => {
+            setSkiptracedFiles(prevFiles => [...prevFiles, ...updatedFiles]);
+        })
+        .catch(error => console.error('Error reading files:', error));
+  };
+
+
+
+  const handleSkiptracedFileChange = async (second) => {
+    const files = Array.from(second.target.files);
+    const filePromises = files.map((file) => {
+      return new Promise((resolve, reject) => { 
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          const contents = event.target.result;
+          const rows = contents.split('\n').length - 1; // Ignore header row
+         
+          resolve({ file, rowCount: rows, fileName: file.name });
         };
+        reader.onerror = reject;
+        reader.readAsText(file);
       });
+    }); 
 
-      const updatedFiles = await Promise.all(filePromises);
-      setSkiptracedFiles(updatedFiles);
-    }
+    Promise.all(filePromises)
+      .then(updatedFiles => {
+        setSkiptracedFiles((prevFiles) => [...prevFiles, ...updatedFiles]);
+      })
+      .catch(error => console.error('Error reading files:', error));
   };
 
   const handleRemoveSkiptracedFile = (index) => {
     setSkiptracedFiles((currentFiles) => currentFiles.filter((_, i) => i !== index));
   };
  
-  const handleSkiptracedSubmit = async () => {
+  const handleSkiptracedSubmit = async (second) => {
     // Prepare the data to send to the backend
     const formData = new FormData();
-
-    skiptracedFiles.forEach((file) => {
-      formData.Data.append('files', file.file);
-    });
-    formData.append('skip_traced_date', skiptracedDate);
-
+    console.log(formData)
+    console.log(skiptracedFiles);
+    try {
+      skiptracedFiles.forEach((file) => {
+        formData.append('files', file);
+      });
+      formData.append('skip_traced_date', skiptracedDate);
+    } catch (error) {
+      console.error('Error:', error);
+    }
     try {
       const token = localStorage.getItem('token');
       const response = await axios.post(`${process.env.REACT_APP_API_URL}/process_skiptraced`, formData, {
@@ -192,13 +235,13 @@ const FileUpload = () => {
         </div>
         <div className="step-container">
           <h2 className="step-title">Step 2: Format Skiptraced Data and Add to Master List</h2>
-          <div className="dropzone">
+            <div onDragOver={handleSkiptraceDragOver} onDrop={handleSkiptraceDrop} className="dropzone">
             <label className="styled-input"><p>Drag and Drop files here</p></label>
             <input type="file" multiple onChange={handleSkiptracedFileChange} />
             <div className="file-list">
               {skiptracedFiles.map((file, index) => (
                 <div key={index} className="file-item">
-                  {file.name} - Rows: {file.rowCount}
+                  {file.fileName} - Rows: {file.rowCount}
                   <button onClick={() => handleRemoveSkiptracedFile(index)} className="styled-button">x</button>
                 </div>
               ))}
@@ -210,7 +253,7 @@ const FileUpload = () => {
                 id="skiptracedDate"
                 placeholder="Skiptraced Date (MM/DD/YYYY)..."
                 value={skiptracedDate}
-                onChange={(e) => setSkiptracedDate(e.target.value)}
+                onChange={(second) => setSkiptracedDate(second.target.value)}
                 className="styled-input"
               />
               <button onClick={handleSkiptracedSubmit} className="styled-button">Process Skiptraced Data</button>
