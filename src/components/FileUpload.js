@@ -1,6 +1,5 @@
 import React, { useState, useRef } from 'react';
 import axios from 'axios';
-import Navigation from './Navigation';
 import FileDownload from './FileDownload';
 
 const FileUpload = () => {
@@ -8,38 +7,14 @@ const FileUpload = () => {
   const [sourceName, setSourceName] = useState('');
   const [listName, setListName] = useState('');
   const [result, setResult] = useState(null);
-  const dropzoneRef = useRef(null);
   const [skiptracedFiles, setSkiptracedFiles] = useState([]);
   const [skiptracedDate, setSkiptracedDate] = useState('');
   const [skiptracedResult, setSkiptracedResult] = useState(null);
+  const [filesToUpload, setFilesToUpload] = useState([]); // For actual File objects
+  const [fileDisplayInfo, setFileDisplayInfo] = useState([]); // For displaying metadata
 
   const handleFileChange = (e) => {
     setFiles(Array.from(e.target.files));
-  };
-
-  const handleLogout = () => {
-    // Remove the token or user session
-    localStorage.removeItem('token');
-    // Redirect to the login page or perform other cleanup
-  };
-
-
-  // Count the number of rows in each file
-  const countRows = async (file): Promise<number> => {
-    return new Promise((resolve, reject) => {
-      try {
-        const reader = new FileReader();
-        reader.onload = (event) => {
-          const contents = event.target.result;
-          const rowCount = contents.split('\n');
-          resolve(rowCount.length);
-        };
-          
-        reader.readAsText(file);
-      } catch (error) {
-        reject(error);
-      }
-    });
   };
 
   const handleSkiptraceDragOver = (second) => {
@@ -48,86 +23,64 @@ const FileUpload = () => {
     second.dataTransfer.dropEffect = 'copy';
   };
 
-  const handleSkiptraceDrop = async (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    const droppedFiles = Array.from(event.dataTransfer.files);  
-    // Process each file to include rowCount and fileName similar to handleSkiptracedFileChange
-    const filePromises = droppedFiles.map(file => {
-        return new Promise((resolve, reject) => { 
-            const reader = new FileReader();
-            reader.onload = (readEvent) => {
-                const contents = readEvent.target.result;
-                const rows = contents.split('\n').length - 1; // Ignore header row
-                resolve({ file, rowCount: rows, fileName: file.name });
-            };
-            reader.onerror = reject;
-            reader.readAsText(file);
-        });
-    });
-
-    Promise.all(filePromises)
-        .then(updatedFiles => {
-            setSkiptracedFiles(prevFiles => [...prevFiles, ...updatedFiles]);
-        })
-        .catch(error => console.error('Error reading files:', error));
-  };
-
-
-
-  const handleSkiptracedFileChange = async (second) => {
-    const files = Array.from(second.target.files);
-    const filePromises = files.map((file) => {
-      return new Promise((resolve, reject) => { 
+  const handleFileProcessing = (files) => {
+    const filePromises = files.map(file => {
+      return new Promise((resolve, reject) => {
         const reader = new FileReader();
-        reader.onload = (event) => {
-          const contents = event.target.result;
-          const rows = contents.split('\n').length - 1; // Ignore header row
-         
-          resolve({ file, rowCount: rows, fileName: file.name });
+        reader.onload = (readEvent) => {
+          const contents = readEvent.target.result;
+          const rows = contents.split('\n').length - 1;
+          resolve({ fileName: file.name, rowCount: rows });
         };
         reader.onerror = reject;
         reader.readAsText(file);
       });
-    }); 
-
+    });
+  
     Promise.all(filePromises)
-      .then(updatedFiles => {
-        setSkiptracedFiles((prevFiles) => [...prevFiles, ...updatedFiles]);
+      .then(fileInfos => {
+        setFilesToUpload(prevFiles => [...prevFiles, ...files]);
+        setFileDisplayInfo(prevInfos => [...prevInfos, ...fileInfos]);
       })
-      .catch(error => console.error('Error reading files:', error));
+      .catch(error => console.error('Error processing files:', error));
   };
-
-  const handleRemoveSkiptracedFile = (index) => {
-    setSkiptracedFiles((currentFiles) => currentFiles.filter((_, i) => i !== index));
+  
+  const handleSkiptraceDrop = async (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const droppedFiles = Array.from(event.dataTransfer.files);
+    handleFileProcessing(droppedFiles);
   };
+  
+  const handleSkiptracedFileChange = async (event) => {
+    const selectedFiles = Array.from(event.target.files);
+    handleFileProcessing(selectedFiles);
+  };
+  
  
-  const handleSkiptracedSubmit = async (second) => {
-    // Prepare the data to send to the backend
+  const handleSkiptracedSubmit = async () => {
     const formData = new FormData();
-    console.log(formData)
-    console.log(skiptracedFiles);
-    try {
-      skiptracedFiles.forEach((file) => {
-        formData.append('files', file);
-      });
-      formData.append('skip_traced_date', skiptracedDate);
-    } catch (error) {
-      console.error('Error:', error);
-    }
+  
+    filesToUpload.forEach(file => {
+      formData.append('files', file);
+    });
+  
+    formData.append('skip_traced_date', skiptracedDate);
+  
     try {
       const token = localStorage.getItem('token');
-      const response = await axios.post(`${process.env.REACT_APP_API_URL}/process_skiptraced`, formData, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
+      const response = await axios.post(
+        `${process.env.REACT_APP_API_URL}/process_skiptraced`, 
+        formData, 
+        { headers: { 'Authorization': `Bearer ${token}` } }
+      );
       setSkiptracedResult(response.data);
     } catch (error) {
       console.error('Error processing skiptraced data:', error);
       alert('An error occurred while processing the skiptraced data.');
     }
   };
+  
 
   const handleDragOver = (e) => {
     e.preventDefault();
@@ -144,6 +97,8 @@ const FileUpload = () => {
   
   const handleRemoveFile = (index) => {
     setFiles((currentFiles) => currentFiles.filter((_, i) => i !== index));
+    setFilesToUpload(prevFiles => prevFiles.filter((_, i) => i !== index));
+    setFileDisplayInfo(prevInfos => prevInfos.filter((_, i) => i !== index));
   };
 
   const handleSubmit = async (e) => {
@@ -239,10 +194,10 @@ const FileUpload = () => {
             <label className="styled-input"><p>Drag and Drop files here</p></label>
             <input type="file" multiple onChange={handleSkiptracedFileChange} />
             <div className="file-list">
-              {skiptracedFiles.map((file, index) => (
+              {fileDisplayInfo.map((info, index) => (
                 <div key={index} className="file-item">
-                  {file.fileName} - Rows: {file.rowCount}
-                  <button onClick={() => handleRemoveSkiptracedFile(index)} className="styled-button">x</button>
+                  {info.fileName} - Rows: {info.rowCount}
+                  <button onClick={() => handleRemoveFile(index)} className="styled-button">x</button>
                 </div>
               ))}
             </div>
