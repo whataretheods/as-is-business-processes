@@ -4,7 +4,6 @@ from flask_jwt_extended import JWTManager, jwt_required, create_access_token, ge
 import numpy as np
 import bcrypt
 import psycopg2
-from psycopg2 import extras
 import pandas as pd
 from datetime import datetime, timedelta, timezone
 from database import get_db_connection
@@ -370,55 +369,45 @@ def process_skiptraced():
                 # Delete vacancy_description
                 df.drop(columns=['vacancy_description'], inplace=True)
 
-                #df.insert(df.columns.get_loc("owner_last_exported_date")+1, "id", None)
+                 
                 # Standardize columns for PostgreSQL data types
-
                 # Replace empty strings with None (which will become NULL in SQL)
-               
+                df.replace({"NaN": None}, inplace=True)
                 print(f"{df.columns}")
-                numeric_columns = ['equity_percent', 'tax_improvement_percent', 'discount']
-                for col in numeric_columns:
-                   df[col] = df[col].astype(pd.Float64Dtype())
-                   df[col] = df[col].apply(lambda x: 0 if pd.isnull(x) or x == '' else x)
-
-                smallint_columns = ['age', 'beds', 'baths', 'year_built', 'rank_number', 'stack_count', 'invol_lien', 'phantom', 'preforeclosure', 'prior_deed_transfer', 'tax_delinquency', 'tax_delinquency_year', 'vacant']
+                smallint_columns = ['tax_delinquency_year','tax_delinquency','prior_deed_transfer','preforeclosure','phantom','invol_lien','stack_count','rank_number','year_built','baths','beds','vacant'] 
+ 
        	        for col in smallint_columns:
                     if col in df.columns:
                         df[col] = df[col].astype(pd.Int64Dtype()) #converts the column values to integers and invalid or missing values to NaN
                         # Replace empty strings with None in the column
                         df[col] = df[col].apply(lambda x: 0 if pd.isnull(x) or x == '' else x)
 
-                integer_columns = ['low_property_avm', 'final_property_avm', 'high_property_avm', 'lot_size', 'sqft', 'sale_price', 'mortgage_past_due_amount', 'mortgage_unpaid_balance_amount']
+
+                integer_columns = ['low_property_avm','final_property_avm','high_property_avm','lot_size','sqft','sale_price','mortgage_past_due_amount','mortgage_unpaid_balance_amount']
+        
                 for col in integer_columns:
                     if col in df.columns:
                         df[col] = df[col].astype(pd.Int64Dtype()) #converts the column values to integers and invalid or missing values to NaN
                         # Replace empty strings with None in the column
                         df[col] = df[col].apply(lambda x: 0 if pd.isnull(x) or x == '' else x)
 
-                date_columns = ['phone1_lastreporteddate', 'phone2_lastreporteddate', 'phone3_lastreporteddate', 'last_skiptraced_date', 'last_sale_date', 'prediction_date', 'first_seen', 'last_updated', 'invol_lien_first_seen',
-                    'invol_lien_last_updated', 'phantom_first_seen', 'phantom_last_updated', 'mortgage_original_due_date', 'mortgage_default_date', 'notice_of_sale_auction_date', 'preforeclosure_first_seen', 
-                    'preforeclosure_last_updated', 'prior_deed_transfer_first_seen', 'prior_deed_transfer_last_updated', 'tax_delinquent_first_seen', 'tax_delinquent_last_updated', 'vacancy_date', 'vacancy_first_seen', 
-                    'vacancy_last_updated', 'property_last_exported_date', 'owner_last_exported_date']
+                date_columns = ['prediction_date', 'last_sale_date', 'first_seen', 'last_updated','invol_lien_first_seen','invol_lien_last_updated',
+                    'phantom_first_seen','phantom_last_updated','mortgage_original_due_date','mortgage_default_date',
+                    'notice_of_sale_auction_date','preforeclosure_first_seen','preforeclosure_last_updated','prior_deed_transfer_first_seen',
+                    'prior_deed_transfer_last_updated','tax_delinquent_last_updated','vacancy_date','vacancy_first_seen','vacancy_last_updated',
+                    'owner_last_exported_date','property_last_exported_date','last_skiptraced_date','sql_last_update_date','sql_added_date']  
+
                 for column in date_columns:
                     df[column] = pd.to_datetime(df[column], format='%Y-%m-%d', errors='coerce')
                     df[column] = df[column].apply(lambda x: x.strftime('%Y-%m-%d') if not pd.isna(x) else None)
-        
-                    #df[column] = df[column].dt.strftime('%Y-%m-%d')
-                    #df[column] = pd.to_datetime(df[column], errors='coerce')  # Converts to NaT where conversion fails
-                    #df[column] = df[column].where(pd.notnull(df[column]), None)  # Converts NaT to None
-                    #df[column] = df[column].where(df[column].notna(), None)
 
-                other_text_columns = ['source_name', 'list', 'original_name', 'owner_1_name', 'owner_1_first_name', 'owner_1_middle_name', 'owner_1_last_name', 'owner_2_name', 'owner_2_first_name', 'owner_2_middle_name', 'owner_2_last_name', 'county', 'property_class', 'dob', 'full_skiptrace_address', 'phone1', 'phone1_cc_disposition', 'phone1_sms_disposition', 'phone1_type', 'phone1_company', 'phone2', 'phone2_type', 'phone2_company', 'phone2_cc_disposition', 'phone2_sms_disposition', 'phone3', 'phone3_type', 'phone3_company', 'phone3_cc_disposition', 'phone3_sms_disposition', 'email1', 'email2', 'email3', 'owner_street_address', 'owner_city', 'owner_state', 'owner_zip_code', 'property_street_address', 'property_city', 'property_state', 'property_zip_code', 'property_type', 'school_district', 'all_active_invol_liens', 'latest_invol_lien', 'preforeclosure_type', 'deed_transfer_type']
-                for column in other_text_columns:
-                    df[column] = df[column].astype(str)
-                    df[column] = df[column].fillna('')
 
-                boolean_columns = ['owner_occupied', 'not_listed', 'active_lien']
-                for column in boolean_columns:
-                    df[column] = df[column].astype(bool)
-                    df[column] = df[column].fillna('')
-
-                #df.replace({"NaN": None}, inplace=True)
+                other_text_columns = df[['email1', 'email2', 'email3', 'full_skiptrace_address','phone1_cc_disposition','phone1_sms_disposition','phone1_type','phone1_company','phone2_type',
+                    'phone2_company', 'phone2_cc_disposition', 'phone2_sms_disposition', 'phone3_type','phone3_company', 'phone3_cc_disposition', 'phone3_sms_disposition', 
+                    'owner_street_address', 'owner_city', 'owner_state', 'owner_zip_code', 'property_street_address', 'property_city', 'property_state', 'property_zip_code', 'property_type',
+                    'school_district', 'not_listed', 'last_sale_date', 'sale_price', 'discount', 'prediction_date', 'rank_number', 'stack_count', 'first_seen', 'last_updated', 'invol_lien', 'all_active_invol_liens', 'latest_invol_lien', 'active_lien', 'invol_lien_first_seen', 'invol_lien_last_updated', 'phantom', 'phantom_first_seen', 'phantom_last_updated', 'preforeclosure', 'preforeclosure_type', 'mortgage_past_due_amount', 'mortgage_unpaid_balance_amount', 'mortgage_original_due_date', 'mortgage_default_date', 'notice_of_sale_auction_date', 'preforeclosure_first_seen', 'preforeclosure_last_updated', 'prior_deed_transfer', 'deed_transfer_type', 'prior_deed_transfer_first_seen', 'prior_deed_transfer_last_updated', 'tax_delinquency', 'tax_delinquency_year', 'tax_delinquent_first_seen', 'tax_delinquent_last_updated', 'vacant', 'vacancy_date', 'vacancy_first_seen', 'vacancy_last_updated', 'property_last_exported_date', 'owner_last_exported_date']]
+                other_text_columns = other_text_columns.fillna('')
+                other_text_columns = other_text_columns.astype(str)
                 # After all modifications, verify the number of columns again
                 if len(df.columns) != 102:
                     return jsonify({'message': f'After modifications, the number of columns is not as expected: {len(df.columns)}'}), 400
@@ -430,45 +419,41 @@ def process_skiptraced():
                 
                 conn = get_db_connection()
                 cur = conn.cursor()
-                for df in processed_files:
-                    # Assuming columns is a list of column names
-                    columns = df.columns.tolist()
-                    placeholders = ', '.join(['%s'] * len(columns))  # Placeholder for each column
 
-                    # Basic INSERT INTO statement (you'll need to adjust for your ON CONFLICT logic)
-                    insert_query = f"""
-                    INSERT INTO my_master_list ({', '.join(columns)})
-                    VALUES ({placeholders})
+                for df in processed_files:
+                    # Prepare the data for insertion
+                    columns = df.columns.tolist()
+                    print(f"{columns}")
+                    # Merge the data with the my_master_list table
+                    merge_query = f"""
+                    INSERT INTO my_master_list ({','.join(columns)})
+                    SELECT {','.join(columns)}
+                    FROM (VALUES {','.join([str(tuple(row)) for row in df.itertuples(index=False)])}) AS new_data ({','.join(columns)})
                     ON CONFLICT (property_street_address, property_city, owner_1_first_name, owner_1_last_name)
                     DO UPDATE SET
-                    phone1 = EXCLUDED.phone1,
-                    phone2 = EXCLUDED.phone2,
-                    phone3 = EXCLUDED.phone3,
-                    email1 = EXCLUDED.email1,
-                    email2 = EXCLUDED.email2,
-                    email3 = EXCLUDED.email3,
-                    last_updated = EXCLUDED.last_updated;
+                        phone1 = COALESCE(NULLIF(my_master_list.phone1, ''), NULLIF(new_data.phone1, '')),
+                        phone2 = COALESCE(NULLIF(my_master_list.phone2, ''), NULLIF(new_data.phone2, '')),
+                        phone3 = COALESCE(NULLIF(my_master_list.phone3, ''), NULLIF(new_data.phone3, '')),
+                        email1 = COALESCE(NULLIF(my_master_list.email1, ''), NULLIF(new_data.email1, '')),
+                        email2 = COALESCE(NULLIF(my_master_list.email2, ''), NULLIF(new_data.email2, '')),
+                        last_skiptraced_date = NULLIF(new_data.last_skiptraced_date, ''),
+                        sql_last_update_date = new_data.sql_last_update_date;
                     """
 
-                    # Prepare data for insertion; ensure it's a list of tuples corresponding to each row
-                    data = [tuple(row) for row in df.itertuples(index=False)]
-
                     try:
-                        with conn.cursor() as cur:
-                            # Execute the parameterized query using execute_batch for bulk operation
-                            extras.execute_batch(cur, insert_query, data, page_size=100)
-                        conn.commit()
+                        cur.execute(merge_query)
                     except psycopg2.errors.UniqueViolation:
                         conn.rollback()
-                        print("Duplicate key violation encountered. Skipping the insertion of duplicate records.")
+                        print(f"Duplicate key violation encountered. Skipping the insertion of duplicate records.")
                     except psycopg2.errors.InFailedSqlTransaction:
                         conn.rollback()
-                        print("Transaction failed. Rolling back the changes.")
+                        print(f"Transaction failed. Rolling back the changes.")
                     except Exception as e:
                         conn.rollback()
                         print(f"An error occurred while merging the data: {str(e)}")
                         raise
-
+                
+                conn.commit()
                 cur.close()
                 conn.close()
 
