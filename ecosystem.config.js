@@ -6,7 +6,7 @@ module.exports = {
     watch: true,
     env: {
       NODE_ENV: 'development',
-      // Other environment variables
+      // Other environment variables as needed
     }
   }]
 };
