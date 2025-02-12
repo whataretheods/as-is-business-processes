@@ -1,3 +1,4 @@
+// src/components/FileDownload.js
 import React from 'react';
 import axios from 'axios';
 
@@ -6,12 +7,9 @@ const FileDownload = () => {
     try {
       const token = localStorage.getItem('token');
       const response = await axios.get(`${process.env.REACT_APP_API_URL}/download_uniques_list`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        },
+        headers: { 'Authorization': `Bearer ${token}` },
         responseType: 'blob'
       });
-
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement('a');
       link.href = url;
