@@ -181,7 +181,7 @@ def process_spreadsheets():
                 except Exception as e:
                     logger.warning(f"Date conversion error for column {col}: {e}")
 
-        # Ensure any remaining missing values are standard Python None
+        # Ensure any remaining missing values become standard Python None
         df = df.applymap(lambda x: None if pd.isna(x) else x)
 
         processed_files.append(df)
@@ -197,7 +197,9 @@ def process_spreadsheets():
         cur.execute("TRUNCATE TABLE audantic_raw_list")
 
         combined_df = pd.concat(processed_files, ignore_index=True)
-        # Use a list comprehension to convert every cell: if pd.isna(x), then None, else x
+        # Force the DataFrame to use generic Python objects
+        combined_df = combined_df.astype(object)
+        # Use a list comprehension to replace missing values (pd.NA, np.nan) with None
         data_tuples = [
             tuple(None if pd.isna(x) else x for x in row)
             for row in combined_df.to_numpy()
@@ -464,6 +466,8 @@ def process_skiptraced():
                 email3 = EXCLUDED.email3,
                 last_updated = EXCLUDED.last_updated;
             """
+            # Force the DataFrame to use generic objects and convert missing values to None
+            df = df.astype(object)
             data_tuples = [
                 tuple(None if pd.isna(x) else x for x in row)
                 for row in df.to_numpy()
