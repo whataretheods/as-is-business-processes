@@ -49,7 +49,7 @@ def custom_user_loader_callback(jwt_header, jwt_data):
         return None
 
     if user:
-        token = user[3]  # Adjust this index as needed
+        token = user[3]  # Adjust index if needed
         token_expiration = user[4]
         if token_expiration:
             token_expiration = token_expiration.replace(tzinfo=timezone.utc)
@@ -100,7 +100,7 @@ def login():
         conn.close()
         return jsonify({'message': 'Invalid username or password'}), 401
 
-# Global variable to hold uniques_list DataFrame (if needed)
+# Global variable for storing the uniques_list DataFrame if needed
 uniques_list_df = None
 
 @app.route('/process_spreadsheets', methods=['POST'])
@@ -144,7 +144,7 @@ def process_spreadsheets():
         # Replace empty strings with None
         df.replace({"": None, "NaN": None}, inplace=True)
 
-        # Convert specified columns to numeric types
+        # Convert specific columns to numeric types
         smallint_columns = ['tax_delinquency_year', 'tax_delinquency', 'prior_deed_transfer',
                              'preforeclosure', 'phantom', 'invol_lien', 'stack_count',
                              'rank_number', 'year_built', 'baths', 'beds', 'vacant']
@@ -177,11 +177,12 @@ def process_spreadsheets():
             if col in df.columns:
                 try:
                     df[col] = pd.to_datetime(df[col], format='%Y-%m-%d', errors='coerce')
-                    df[col] = df[col].dt.strftime('%Y-%m-%d')
+                    df[col] = df[col].apply(lambda x: x.strftime('%Y-%m-%d') if not pd.isna(x) else None)
                 except Exception as e:
                     logger.warning(f"Date conversion error for column {col}: {e}")
 
-        # Replace any remaining missing values with None
+        # Use the DataFrame's built-in methods to replace any remaining missing values
+        df = df.replace({pd.NA: None})
         df = df.where(pd.notnull(df), None)
 
         processed_files.append(df)
@@ -197,15 +198,29 @@ def process_spreadsheets():
         cur.execute("TRUNCATE TABLE audantic_raw_list")
 
         combined_df = pd.concat(processed_files, ignore_index=True)
-        # Force the DataFrame to use generic Python objects and replace missing values
+        # Log some debug info: dtypes and a sample row
+        logger.info(f"Combined DF dtypes:\n{combined_df.dtypes}")
+        sample_row = combined_df.iloc[0].to_dict()
+        logger.info(f"Sample row before conversion: {sample_row}")
+
+        # Force DataFrame to use generic Python objects and explicitly replace missing values
         combined_df = combined_df.astype(object).replace({pd.NA: None, np.nan: None})
+        # Build tuple list from DataFrame values
         data_tuples = [tuple(row) for row in combined_df.values]
 
+        # Extra logging: check the first 5 rows for any lingering NAType values
         columns = combined_df.columns.tolist()
+        for i, row in enumerate(data_tuples[:5]):
+            for j, val in enumerate(row):
+                if pd.isna(val):
+                    # This check should now be False since we replaced them with None,
+                    # but if not, log it.
+                    logger.error(f"Row {i}, Column '{columns[j]}' still has NA-like value: {val} (type: {type(val)})")
+
         insert_query = f"INSERT INTO audantic_raw_list ({','.join(columns)}) VALUES %s"
         execute_values(cur, insert_query, data_tuples, page_size=1000)
 
-        # Count unique rows
+        # Count unique rows using the provided query
         unique_count_query = """
         SELECT COUNT(*)
         FROM audantic_raw_list arl
@@ -412,7 +427,7 @@ def process_skiptraced():
             if col in df.columns:
                 try:
                     df[col] = pd.to_datetime(df[col], format='%Y-%m-%d', errors='coerce')
-                    df[col] = df[col].dt.strftime('%Y-%m-%d')
+                    df[col] = df[col].apply(lambda x: x.strftime('%Y-%m-%d') if not pd.isna(x) else None)
                 except Exception as e:
                     logger.warning(f"Error converting date column {col}: {e}")
 
@@ -463,7 +478,7 @@ def process_skiptraced():
                 email3 = EXCLUDED.email3,
                 last_updated = EXCLUDED.last_updated;
             """
-            # Force the DataFrame to use generic Python objects and replace missing values
+            # Force DataFrame to use generic Python objects and replace missing values
             df = df.astype(object).replace({pd.NA: None, np.nan: None})
             data_tuples = [tuple(row) for row in df.values]
             try:
