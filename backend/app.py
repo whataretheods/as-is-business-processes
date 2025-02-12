@@ -181,7 +181,9 @@ def process_spreadsheets():
                 except Exception as e:
                     logger.warning(f"Date conversion error for column {col}: {e}")
 
-        df = df.where(pd.notnull(df), None)
+        # Convert any remaining missing values to None using applymap
+        df = df.applymap(lambda x: None if pd.isna(x) else x)
+
         processed_files.append(df)
 
     if not processed_files:
@@ -195,6 +197,8 @@ def process_spreadsheets():
         cur.execute("TRUNCATE TABLE audantic_raw_list")
 
         combined_df = pd.concat(processed_files, ignore_index=True)
+        # Convert any pd.NA or NaN to None for the entire DataFrame
+        combined_df = combined_df.applymap(lambda x: None if pd.isna(x) else x)
         columns = combined_df.columns.tolist()
         insert_query = f"INSERT INTO audantic_raw_list ({','.join(columns)}) VALUES %s"
         data_tuples = [tuple(x) for x in combined_df.to_numpy()]
@@ -256,6 +260,7 @@ def process_spreadsheets():
     except Exception as e:
         logger.error(f"General error in processing spreadsheets: {e}")
         return jsonify({'message': 'An error occurred while processing the spreadsheets.', 'error': str(e)}), 500
+
 
 @app.route('/download_uniques_list', methods=['GET'])
 @jwt_required()
@@ -329,7 +334,7 @@ def process_skiptraced():
         insert_idx = df.columns.get_loc("list") + 1 if "list" in df.columns else 1
         df.insert(insert_idx, "original_name", "")
 
-        // Move owner-related columns if available
+        # Move owner-related columns if available
         const_owner_cols = ['owner_1_name', 'owner_1_first_name', 'owner_1_last_name',
                               'owner_2_name', 'owner_2_first_name', 'owner_2_last_name']
         if all(col in df.columns for col in const_owner_cols):
@@ -355,7 +360,7 @@ def process_skiptraced():
         if 'county' in df.columns:
             df.insert(df.columns.get_loc("county") + 1, 'property_class', 0)
 
-        // Insert disposition columns around phone columns
+        # Insert disposition columns around phone columns
         phone_fields = [
             ("phone1", "phone1_cc_disposition", "phone1_sms_disposition"),
             ("phone2_company", "phone2_cc_disposition", "phone2_sms_disposition"),
@@ -367,7 +372,7 @@ def process_skiptraced():
                 df.insert(base_idx + 1, cc, "")
                 df.insert(base_idx + 2, sms, "")
 
-        // Move owner address details if available
+        # Move owner address details if available
         const_addr_cols = ['owner_street_address', 'owner_city', 'owner_state', 'owner_zip_code']
         if all(col in df.columns for col in const_addr_cols):
             addr_data = df[const_addr_cols]
@@ -380,7 +385,7 @@ def process_skiptraced():
         if 'vacancy_description' in df.columns:
             df.drop(columns=['vacancy_description'], inplace=True)
 
-        // Standardize numeric columns
+        # Standardize numeric columns
         numeric_columns = ['equity_percent', 'tax_improvement_percent', 'discount']
         for col in numeric_columns:
             if col in df.columns:
@@ -396,7 +401,7 @@ def process_skiptraced():
             if col in df.columns:
                 df[col] = df[col].astype(pd.Int64Dtype()).fillna(0)
 
-        // Convert date columns for skiptraced data
+        # Convert date columns for skiptraced data
         date_columns = ['phone1_lastreporteddate', 'phone2_lastreporteddate', 'phone3_lastreporteddate', 'last_skiptraced_date', 'last_sale_date', 'prediction_date', 'first_seen', 'last_updated', 'invol_lien_first_seen',
                         'invol_lien_last_updated', 'phantom_first_seen', 'phantom_last_updated', 'mortgage_original_due_date', 'mortgage_default_date', 'notice_of_sale_auction_date', 'preforeclosure_first_seen',
                         'preforeclosure_last_updated', 'prior_deed_transfer_first_seen', 'prior_deed_transfer_last_updated', 'tax_delinquent_first_seen', 'tax_delinquent_last_updated', 'vacancy_date', 'vacancy_first_seen',
