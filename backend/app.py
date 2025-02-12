@@ -22,8 +22,12 @@ from database import get_db_connection
 # Load environment variables
 load_dotenv()
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+# Configure logging (set level to DEBUG for full detail)
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s %(levelname)s [%(name)s:%(lineno)d] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S"
+)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
@@ -33,6 +37,18 @@ CORS(app, resources={r"/*": {"origins": os.getenv('APP_FRONT_END_URL')}})
 app.config['JWT_SECRET_KEY'] = os.getenv('JWT_KEY')
 app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=2)
 jwt = JWTManager(app)
+
+def convert_value(x):
+    """
+    Convert a value to a native Python type.
+    If the value is missing, return None.
+    If the value is a NumPy scalar, return its Python value.
+    """
+    if pd.isna(x):
+        return None
+    if isinstance(x, np.generic):
+        return x.item()
+    return x
 
 @jwt.user_lookup_loader
 def custom_user_loader_callback(jwt_header, jwt_data):
@@ -100,7 +116,7 @@ def login():
         conn.close()
         return jsonify({'message': 'Invalid username or password'}), 401
 
-# Global variable for storing the uniques_list DataFrame if needed
+# Global variable to hold uniques_list DataFrame (if needed)
 uniques_list_df = None
 
 @app.route('/process_spreadsheets', methods=['POST'])
@@ -144,7 +160,7 @@ def process_spreadsheets():
         # Replace empty strings with None
         df.replace({"": None, "NaN": None}, inplace=True)
 
-        # Convert specific columns to numeric types
+        # Convert specified columns to numeric types
         smallint_columns = ['tax_delinquency_year', 'tax_delinquency', 'prior_deed_transfer',
                              'preforeclosure', 'phantom', 'invol_lien', 'stack_count',
                              'rank_number', 'year_built', 'baths', 'beds', 'vacant']
@@ -181,8 +197,7 @@ def process_spreadsheets():
                 except Exception as e:
                     logger.warning(f"Date conversion error for column {col}: {e}")
 
-        # Use the DataFrame's built-in methods to replace any remaining missing values
-        df = df.replace({pd.NA: None})
+        # Replace any remaining missing values with None
         df = df.where(pd.notnull(df), None)
 
         processed_files.append(df)
@@ -198,29 +213,22 @@ def process_spreadsheets():
         cur.execute("TRUNCATE TABLE audantic_raw_list")
 
         combined_df = pd.concat(processed_files, ignore_index=True)
-        # Log some debug info: dtypes and a sample row
-        logger.info(f"Combined DF dtypes:\n{combined_df.dtypes}")
-        sample_row = combined_df.iloc[0].to_dict()
-        logger.info(f"Sample row before conversion: {sample_row}")
+        logger.debug(f"Combined DF dtypes:\n{combined_df.dtypes}")
+        logger.debug(f"Combined DF shape: {combined_df.shape}")
 
-        # Force DataFrame to use generic Python objects and explicitly replace missing values
+        # Convert the DataFrame to generic Python objects and replace missing values
         combined_df = combined_df.astype(object).replace({pd.NA: None, np.nan: None})
-        # Build tuple list from DataFrame values
-        data_tuples = [tuple(row) for row in combined_df.values]
+        # Build tuple list using our helper conversion for each value
+        data_tuples = [tuple(convert_value(x) for x in row) for row in combined_df.values]
 
-        # Extra logging: check the first 5 rows for any lingering NAType values
+        # Log the first sample row for debugging
+        logger.debug(f"Sample row after conversion: {data_tuples[0] if data_tuples else 'No rows'}")
+        
         columns = combined_df.columns.tolist()
-        for i, row in enumerate(data_tuples[:5]):
-            for j, val in enumerate(row):
-                if pd.isna(val):
-                    # This check should now be False since we replaced them with None,
-                    # but if not, log it.
-                    logger.error(f"Row {i}, Column '{columns[j]}' still has NA-like value: {val} (type: {type(val)})")
-
         insert_query = f"INSERT INTO audantic_raw_list ({','.join(columns)}) VALUES %s"
         execute_values(cur, insert_query, data_tuples, page_size=1000)
 
-        # Count unique rows using the provided query
+        # Count unique rows
         unique_count_query = """
         SELECT COUNT(*)
         FROM audantic_raw_list arl
@@ -417,11 +425,12 @@ def process_skiptraced():
 
         date_columns = ['phone1_lastreporteddate', 'phone2_lastreporteddate', 'phone3_lastreporteddate',
                         'last_skiptraced_date', 'last_sale_date', 'prediction_date', 'first_seen', 'last_updated',
-                        'invol_lien_first_seen', 'invol_lien_last_updated', 'phantom_first_seen', 'phantom_last_updated',
-                        'mortgage_original_due_date', 'mortgage_default_date', 'notice_of_sale_auction_date',
-                        'preforeclosure_first_seen', 'preforeclosure_last_updated', 'prior_deed_transfer_first_seen',
-                        'prior_deed_transfer_last_updated', 'tax_delinquent_first_seen', 'tax_delinquent_last_updated',
-                        'vacancy_date', 'vacancy_first_seen', 'vacancy_last_updated', 'property_last_exported_date',
+                        'invol_lien_firstreporteddate', 'invol_lien_lastreporteddate', 'phantom_firstseen',
+                        'phantom_lastreporteddate', 'mortgage_original_due_date', 'mortgage_default_date',
+                        'notice_of_sale_auction_date', 'preforeclosure_first_seen', 'preforeclosure_last_updated',
+                        'prior_deed_transfer_first_seen', 'prior_deed_transfer_last_updated',
+                        'tax_delinquent_first_seen', 'tax_delinquent_last_updated', 'vacancy_date',
+                        'vacancy_first_seen', 'vacancy_last_updated', 'property_last_exported_date',
                         'owner_last_exported_date']
         for col in date_columns:
             if col in df.columns:
@@ -480,7 +489,7 @@ def process_skiptraced():
             """
             # Force DataFrame to use generic Python objects and replace missing values
             df = df.astype(object).replace({pd.NA: None, np.nan: None})
-            data_tuples = [tuple(row) for row in df.values]
+            data_tuples = [tuple(convert_value(x) for x in row) for row in df.values]
             try:
                 execute_values(cur, insert_query, data_tuples, page_size=100)
                 conn.commit()
