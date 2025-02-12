@@ -126,8 +126,8 @@ def process_spreadsheets():
             "property_county": "county",
             "rank": "rank_number",
             "tax_delinquent_year": "tax_delinquency_year",
-            "tax_delinquent_first_seen": "tax_delinquency_first_seen",
-            "tax_delinquent_last_updated": "tax_delinquency_last_updated"
+            "tax_delinquent_first_seen": "tax_delinquent_first_seen",
+            "tax_delinquent_last_updated": "tax_delinquent_last_updated"
         }
         df.rename(columns=renames, inplace=True)
         # Replace empty strings with None (like the original code)
