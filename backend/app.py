@@ -14,9 +14,7 @@ from psycopg2 import extras
 from psycopg2.extras import execute_values  # For efficient bulk inserts
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
-from flask_jwt_extended import (
-    JWTManager, jwt_required, create_access_token, get_jwt_identity
-)
+from flask_jwt_extended import JWTManager, jwt_required, create_access_token, get_jwt_identity
 from dotenv import load_dotenv
 
 from database import get_db_connection
@@ -51,7 +49,7 @@ def custom_user_loader_callback(jwt_header, jwt_data):
         return None
 
     if user:
-        token = user[3]  # Adjust based on your table columns
+        token = user[3]  # Adjust this index as needed
         token_expiration = user[4]
         if token_expiration:
             token_expiration = token_expiration.replace(tzinfo=timezone.utc)
@@ -146,9 +144,10 @@ def process_spreadsheets():
         # Replace empty strings with None
         df.replace({"": None, "NaN": None}, inplace=True)
 
-        # Convert columns to numeric types where needed
-        smallint_columns = ['tax_delinquency_year','tax_delinquency','prior_deed_transfer','preforeclosure',
-                            'phantom','invol_lien','stack_count','rank_number','year_built','baths','beds','vacant']
+        # Convert specified columns to numeric types
+        smallint_columns = ['tax_delinquency_year', 'tax_delinquency', 'prior_deed_transfer',
+                             'preforeclosure', 'phantom', 'invol_lien', 'stack_count',
+                             'rank_number', 'year_built', 'baths', 'beds', 'vacant']
         for col in smallint_columns:
             if col in df.columns:
                 try:
@@ -156,8 +155,9 @@ def process_spreadsheets():
                 except Exception as e:
                     logger.warning(f"Conversion error for column {col}: {e}")
 
-        integer_columns = ['low_property_avm','final_property_avm','high_property_avm','lot_size','sqft',
-                           'sale_price','mortgage_past_due_amount','mortgage_unpaid_balance_amount']
+        integer_columns = ['low_property_avm', 'final_property_avm', 'high_property_avm',
+                           'lot_size', 'sqft', 'sale_price', 'mortgage_past_due_amount',
+                           'mortgage_unpaid_balance_amount']
         for col in integer_columns:
             if col in df.columns:
                 try:
@@ -167,12 +167,12 @@ def process_spreadsheets():
 
         # Convert date columns
         date_columns = ['prediction_date', 'last_sale_date', 'first_seen', 'last_updated',
-                        'invol_lien_first_seen','invol_lien_last_updated','phantom_first_seen',
-                        'phantom_last_updated','mortgage_original_due_date','mortgage_default_date',
-                        'notice_of_sale_auction_date','preforeclosure_first_seen','preforeclosure_last_updated',
-                        'prior_deed_transfer_first_seen','prior_deed_transfer_last_updated',
-                        'tax_delinquent_last_updated','vacancy_date','vacancy_first_seen','vacancy_last_updated',
-                        'owner_last_exported_date','property_last_exported_date']
+                        'invol_lien_first_seen', 'invol_lien_last_updated', 'phantom_first_seen',
+                        'phantom_last_updated', 'mortgage_original_due_date', 'mortgage_default_date',
+                        'notice_of_sale_auction_date', 'preforeclosure_first_seen', 'preforeclosure_last_updated',
+                        'prior_deed_transfer_first_seen', 'prior_deed_transfer_last_updated',
+                        'tax_delinquent_last_updated', 'vacancy_date', 'vacancy_first_seen',
+                        'vacancy_last_updated', 'owner_last_exported_date', 'property_last_exported_date']
         for col in date_columns:
             if col in df.columns:
                 try:
@@ -181,7 +181,7 @@ def process_spreadsheets():
                 except Exception as e:
                     logger.warning(f"Date conversion error for column {col}: {e}")
 
-        # Convert any remaining missing values to None using applymap
+        # Ensure any remaining missing values are standard Python None
         df = df.applymap(lambda x: None if pd.isna(x) else x)
 
         processed_files.append(df)
@@ -193,18 +193,20 @@ def process_spreadsheets():
         conn = get_db_connection()
         cur = conn.cursor()
 
-        # Clear raw data table
+        # Clear the raw data table
         cur.execute("TRUNCATE TABLE audantic_raw_list")
 
         combined_df = pd.concat(processed_files, ignore_index=True)
-        # Convert any pd.NA or NaN to None for the entire DataFrame
-        combined_df = combined_df.applymap(lambda x: None if pd.isna(x) else x)
+        # Use a list comprehension to convert every cell: if pd.isna(x), then None, else x
+        data_tuples = [
+            tuple(None if pd.isna(x) else x for x in row)
+            for row in combined_df.to_numpy()
+        ]
         columns = combined_df.columns.tolist()
         insert_query = f"INSERT INTO audantic_raw_list ({','.join(columns)}) VALUES %s"
-        data_tuples = [tuple(x) for x in combined_df.to_numpy()]
         execute_values(cur, insert_query, data_tuples, page_size=1000)
 
-        # Query unique rows count
+        # Count unique rows
         unique_count_query = """
         SELECT COUNT(*)
         FROM audantic_raw_list arl
@@ -261,7 +263,6 @@ def process_spreadsheets():
         logger.error(f"General error in processing spreadsheets: {e}")
         return jsonify({'message': 'An error occurred while processing the spreadsheets.', 'error': str(e)}), 500
 
-
 @app.route('/download_uniques_list', methods=['GET'])
 @jwt_required()
 def download_uniques_list():
@@ -282,7 +283,7 @@ def download_uniques_list():
 
         if result:
             file_data = result[0]
-            # If stored as bytea, convert to JSON string
+            # Convert bytea to JSON string if needed
             json_data = file_data.tobytes().decode() if hasattr(file_data, "tobytes") else file_data.decode()
             df = pd.read_json(json_data)
             with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv') as temp_file:
@@ -320,7 +321,6 @@ def process_skiptraced():
             logger.warning(f"Expected 91 columns but got {num_cols}. Skipping file {file.filename}")
             continue
 
-        # Standardize column names and perform modifications
         df.columns = [col.lower().replace(" ", "_").replace("%", "percent").replace("-", "") for col in df.columns]
         df.rename(columns={'full_address': 'full_skiptrace_address'}, inplace=True)
         if 'has_duplicates' in df.columns:
@@ -330,7 +330,6 @@ def process_skiptraced():
         df["sql_last_update_date"] = upload_date
         df["sql_added_date"] = upload_date
 
-        # Insert original_name column after list column (if present)
         insert_idx = df.columns.get_loc("list") + 1 if "list" in df.columns else 1
         df.insert(insert_idx, "original_name", "")
 
@@ -360,7 +359,6 @@ def process_skiptraced():
         if 'county' in df.columns:
             df.insert(df.columns.get_loc("county") + 1, 'property_class', 0)
 
-        # Insert disposition columns around phone columns
         phone_fields = [
             ("phone1", "phone1_cc_disposition", "phone1_sms_disposition"),
             ("phone2_company", "phone2_cc_disposition", "phone2_sms_disposition"),
@@ -372,7 +370,6 @@ def process_skiptraced():
                 df.insert(base_idx + 1, cc, "")
                 df.insert(base_idx + 2, sms, "")
 
-        # Move owner address details if available
         const_addr_cols = ['owner_street_address', 'owner_city', 'owner_state', 'owner_zip_code']
         if all(col in df.columns for col in const_addr_cols):
             addr_data = df[const_addr_cols]
@@ -385,27 +382,33 @@ def process_skiptraced():
         if 'vacancy_description' in df.columns:
             df.drop(columns=['vacancy_description'], inplace=True)
 
-        # Standardize numeric columns
         numeric_columns = ['equity_percent', 'tax_improvement_percent', 'discount']
         for col in numeric_columns:
             if col in df.columns:
                 df[col] = df[col].astype(pd.Float64Dtype()).fillna(0)
 
-        smallint_columns = ['age', 'beds', 'baths', 'year_built', 'rank_number', 'stack_count', 'invol_lien', 'phantom', 'preforeclosure', 'prior_deed_transfer', 'tax_delinquency', 'tax_delinquency_year', 'vacant']
+        smallint_columns = ['age', 'beds', 'baths', 'year_built', 'rank_number', 'stack_count',
+                             'invol_lien', 'phantom', 'preforeclosure', 'prior_deed_transfer',
+                             'tax_delinquency', 'tax_delinquency_year', 'vacant']
         for col in smallint_columns:
             if col in df.columns:
                 df[col] = df[col].astype(pd.Int64Dtype()).fillna(0)
 
-        integer_columns = ['low_property_avm', 'final_property_avm', 'high_property_avm', 'lot_size', 'sqft', 'sale_price', 'mortgage_past_due_amount', 'mortgage_unpaid_balance_amount']
+        integer_columns = ['low_property_avm', 'final_property_avm', 'high_property_avm',
+                           'lot_size', 'sqft', 'sale_price', 'mortgage_past_due_amount',
+                           'mortgage_unpaid_balance_amount']
         for col in integer_columns:
             if col in df.columns:
                 df[col] = df[col].astype(pd.Int64Dtype()).fillna(0)
 
-        # Convert date columns for skiptraced data
-        date_columns = ['phone1_lastreporteddate', 'phone2_lastreporteddate', 'phone3_lastreporteddate', 'last_skiptraced_date', 'last_sale_date', 'prediction_date', 'first_seen', 'last_updated', 'invol_lien_first_seen',
-                        'invol_lien_last_updated', 'phantom_first_seen', 'phantom_last_updated', 'mortgage_original_due_date', 'mortgage_default_date', 'notice_of_sale_auction_date', 'preforeclosure_first_seen',
-                        'preforeclosure_last_updated', 'prior_deed_transfer_first_seen', 'prior_deed_transfer_last_updated', 'tax_delinquent_first_seen', 'tax_delinquent_last_updated', 'vacancy_date', 'vacancy_first_seen',
-                        'vacancy_last_updated', 'property_last_exported_date', 'owner_last_exported_date']
+        date_columns = ['phone1_lastreporteddate', 'phone2_lastreporteddate', 'phone3_lastreporteddate',
+                        'last_skiptraced_date', 'last_sale_date', 'prediction_date', 'first_seen', 'last_updated',
+                        'invol_lien_first_seen', 'invol_lien_last_updated', 'phantom_first_seen', 'phantom_last_updated',
+                        'mortgage_original_due_date', 'mortgage_default_date', 'notice_of_sale_auction_date',
+                        'preforeclosure_first_seen', 'preforeclosure_last_updated', 'prior_deed_transfer_first_seen',
+                        'prior_deed_transfer_last_updated', 'tax_delinquent_first_seen', 'tax_delinquent_last_updated',
+                        'vacancy_date', 'vacancy_first_seen', 'vacancy_last_updated', 'property_last_exported_date',
+                        'owner_last_exported_date']
         for col in date_columns:
             if col in df.columns:
                 try:
@@ -414,7 +417,17 @@ def process_skiptraced():
                 except Exception as e:
                     logger.warning(f"Error converting date column {col}: {e}")
 
-        other_text_columns = ['source_name', 'list', 'original_name', 'owner_1_name', 'owner_1_first_name', 'owner_1_middle_name', 'owner_1_last_name', 'owner_2_name', 'owner_2_first_name', 'owner_2_middle_name', 'owner_2_last_name', 'county', 'property_class', 'dob', 'full_skiptrace_address', 'phone1', 'phone1_cc_disposition', 'phone1_sms_disposition', 'phone1_type', 'phone1_company', 'phone2', 'phone2_type', 'phone2_company', 'phone2_cc_disposition', 'phone2_sms_disposition', 'phone3', 'phone3_type', 'phone3_company', 'phone3_cc_disposition', 'phone3_sms_disposition', 'email1', 'email2', 'email3', 'owner_street_address', 'owner_city', 'owner_state', 'owner_zip_code', 'property_street_address', 'property_city', 'property_state', 'property_zip_code', 'property_type', 'school_district', 'all_active_invol_liens', 'latest_invol_lien', 'preforeclosure_type', 'deed_transfer_type']
+        other_text_columns = ['source_name', 'list', 'original_name', 'owner_1_name', 'owner_1_first_name',
+                              'owner_1_middle_name', 'owner_1_last_name', 'owner_2_name', 'owner_2_first_name',
+                              'owner_2_middle_name', 'owner_2_last_name', 'county', 'property_class', 'dob',
+                              'full_skiptrace_address', 'phone1', 'phone1_cc_disposition', 'phone1_sms_disposition',
+                              'phone1_type', 'phone1_company', 'phone2', 'phone2_type', 'phone2_company',
+                              'phone2_cc_disposition', 'phone2_sms_disposition', 'phone3', 'phone3_type',
+                              'phone3_company', 'phone3_cc_disposition', 'phone3_sms_disposition', 'email1',
+                              'email2', 'email3', 'owner_street_address', 'owner_city', 'owner_state',
+                              'owner_zip_code', 'property_street_address', 'property_city', 'property_state',
+                              'property_zip_code', 'property_type', 'school_district', 'all_active_invol_liens',
+                              'latest_invol_lien', 'preforeclosure_type', 'deed_transfer_type']
         for col in other_text_columns:
             if col in df.columns:
                 df[col] = df[col].astype(str).fillna('')
@@ -451,7 +464,10 @@ def process_skiptraced():
                 email3 = EXCLUDED.email3,
                 last_updated = EXCLUDED.last_updated;
             """
-            data_tuples = [tuple(x) for x in df.to_numpy()]
+            data_tuples = [
+                tuple(None if pd.isna(x) else x for x in row)
+                for row in df.to_numpy()
+            ]
             try:
                 execute_values(cur, insert_query, data_tuples, page_size=100)
                 conn.commit()
