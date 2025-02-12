@@ -9,16 +9,20 @@ from datetime import datetime, timedelta, timezone
 import numpy as np
 import pandas as pd
 import bcrypt
+import psycopg2
+from psycopg2 import extras
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager, jwt_required, create_access_token, get_jwt_identity
-from sqlalchemy import create_engine, text
 from dotenv import load_dotenv
+from sqlalchemy import create_engine, text
 
-# Load environment variables from .env
+from database import get_db_connection  # (Assuming this returns a psycopg2 connection for skiptraced code)
+
+# Load environment variables
 load_dotenv()
 
-# Configure logging (INFO level should be sufficient)
+# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s [%(name)s:%(lineno)d] %(message)s",
@@ -30,12 +34,12 @@ app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": os.getenv('APP_FRONT_END_URL')}})
 
 # Configure JWT
-app.config['JWT_SECRET_KEY'] = os.getenv('JWT_KEY')
-app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=2)
+app.config["JWT_SECRET_KEY"] = os.getenv("JWT_KEY")
+app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(hours=2)
 jwt = JWTManager(app)
 
-# Create SQLAlchemy engine.
-# The URL format is "postgresql+psycopg2://user:password@host/dbname"
+# Create SQLAlchemy engine for our spreadsheets endpoint.
+# Format: "postgresql+psycopg2://user:password@host/dbname"
 db_url = f"postgresql+psycopg2://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}@{os.getenv('DB_HOST')}/{os.getenv('DB_NAME')}"
 engine = create_engine(db_url)
 
@@ -64,19 +68,18 @@ def custom_user_loader_callback(jwt_header, jwt_data):
     return None
 
 # --- Login Endpoint ---
-@app.route('/login', methods=['POST'])
+@app.route("/login", methods=["POST"])
 def login():
     data = request.get_json()
     username = data.get("username")
     password = data.get("password")
     logger.info(f"Login request for username: {username}")
     try:
-        with engine.connect() as conn:
-            result = conn.execute(
-                text("SELECT * FROM users WHERE username = :username"),
-                {"username": username}
-            )
-            user = result.fetchone()
+        # Using the original get_db_connection (psycopg2) for login
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM users WHERE username = %s", (username,))
+        user = cur.fetchone()
     except Exception as e:
         logger.error(f"Database error during login: {e}")
         return jsonify({"message": "Database error."}), 500
@@ -85,23 +88,34 @@ def login():
         access_token = create_access_token(identity=username)
         token_expiration = datetime.utcnow() + app.config["JWT_ACCESS_TOKEN_EXPIRES"]
         try:
-            with engine.begin() as conn:
-                conn.execute(
-                    text("UPDATE users SET token = :token, token_expiration = :token_expiration WHERE id = :id"),
-                    {"token": access_token, "token_expiration": token_expiration, "id": user[0]}
+            cur.execute(
+                "UPDATE users SET token = %s, token_expiration = %s WHERE id = %s",
+                (access_token, token_expiration, user[0])
+            )
+            if cur.rowcount == 0:
+                cur.execute(
+                    "INSERT INTO users (username, password, token, token_expiration) VALUES (%s, %s, %s, %s)",
+                    (username, user[2], access_token, token_expiration)
                 )
+            conn.commit()
         except Exception as e:
             logger.error(f"Error updating token: {e}")
+            conn.rollback()
             return jsonify({"message": "Error processing login."}), 500
+        finally:
+            cur.close()
+            conn.close()
         return jsonify({"token": access_token}), 200
     else:
+        cur.close()
+        conn.close()
         return jsonify({"message": "Invalid username or password"}), 401
 
-# Global variable to store the uniques_list DataFrame for downloads
+# Global variable to store the uniques_list DataFrame (for download)
 uniques_list_df = None
 
 # --- Process Spreadsheets Endpoint ---
-@app.route('/process_spreadsheets', methods=['POST'])
+@app.route("/process_spreadsheets", methods=["POST"])
 @jwt_required()
 def process_spreadsheets():
     current_user_id = get_jwt_identity()
@@ -117,6 +131,7 @@ def process_spreadsheets():
     processed_files = []
     for file in uploaded_files:
         try:
+            # Read CSV without any explicit dtype conversion.
             df = pd.read_csv(file)
         except Exception as e:
             logger.error(f"Error reading CSV file: {e}")
@@ -125,9 +140,10 @@ def process_spreadsheets():
         if len(df.columns) != 70:
             return jsonify({"message": "The spreadsheet must contain exactly 70 columns."}), 400
 
-        # Add metadata and normalize column names
+        # Add metadata columns
         df.insert(0, "source_name", source_name)
         df.insert(1, "list", list_name)
+        # Normalize column names as in the original code
         df.columns = [col.lower().replace(" ", "_").replace("%", "percent").replace("-", "") for col in df.columns]
         renames = {
             "property_county": "county",
@@ -137,11 +153,13 @@ def process_spreadsheets():
             "tax_delinquent_last_updated": "tax_delinquent_last_updated"
         }
         df.rename(columns=renames, inplace=True)
-        # Replace empty strings with None (to become SQL NULL)
+
+        # Replace empty strings with None
         df.replace({"": None}, inplace=True)
         df.replace({"NaN": None}, inplace=True)
 
-        # (The original code did not perform explicit type conversions that introduced NAType.)
+        # (The original code did not explicitly convert numeric columns to nullable types.)
+        # So we leave the types as inferred (if an integer column has missing values, it will be float).
         processed_files.append(df)
 
     if not processed_files:
@@ -149,15 +167,14 @@ def process_spreadsheets():
 
     try:
         combined_df = pd.concat(processed_files, ignore_index=True)
-        # Ensure missing values remain as np.nan or None
+        # Ensure that missing values remain as np.nan (which to_sql() handles correctly)
         combined_df = combined_df.where(pd.notnull(combined_df), None)
         with engine.begin() as conn:
-            # Truncate the raw table
+            # Truncate the raw list table
             conn.execute(text("TRUNCATE TABLE audantic_raw_list"))
-            # Use Pandas to_sql() for bulk insertion.
-            # Pandas automatically converts np.nan to SQL NULL.
+            # Insert using Pandas' to_sql() which automatically converts np.nan to SQL NULL
             combined_df.to_sql("audantic_raw_list", con=conn, if_exists="append", index=False, method="multi")
-            # Count unique rows using a raw SQL query.
+            # Count unique rows as in the original code:
             result = conn.execute(text("""
                 SELECT COUNT(*)
                 FROM audantic_raw_list arl
@@ -171,7 +188,7 @@ def process_spreadsheets():
                 )
             """))
             unique_count = result.fetchone()[0]
-            # Recreate uniques_list table.
+            # Recreate the uniques_list table
             conn.execute(text("DROP TABLE IF EXISTS uniques_list"))
             conn.execute(text("""
                 CREATE TABLE uniques_list AS
@@ -186,6 +203,7 @@ def process_spreadsheets():
                       AND my_master_list.phone1 IS NOT NULL
                 )
             """))
+            # Read uniques_list for download
             uniques_df = pd.read_sql_query("SELECT * FROM uniques_list", conn)
             json_data = uniques_df.to_json(orient="records")
             binary_data = json_data.encode()
@@ -200,7 +218,7 @@ def process_spreadsheets():
         return jsonify({"message": "An error occurred while processing the spreadsheets.", "error": str(e)}), 500
 
 # --- Download Uniques List Endpoint ---
-@app.route('/download_uniques_list', methods=['GET'])
+@app.route("/download_uniques_list", methods=["GET"])
 @jwt_required()
 def download_uniques_list():
     current_user_id = get_jwt_identity()
@@ -213,12 +231,13 @@ def download_uniques_list():
                     WHERE username = :username
                     ORDER BY timestamp DESC
                     LIMIT 1
-                """), {"username": current_user_id}
+                """),
+                {"username": current_user_id}
             )
             row = result.fetchone()
             if row:
                 file_data = row[0]
-                # file_data is stored as bytes; decode it to a string.
+                # file_data is stored as bytes; decode it.
                 json_data = file_data.decode()
                 df = pd.read_json(json_data)
                 with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".csv") as temp_file:
@@ -232,7 +251,7 @@ def download_uniques_list():
         return jsonify({"message": "An error occurred while downloading the uniques list.", "error": str(e)}), 500
 
 # --- Process Skiptraced Endpoint ---
-@app.route('/process_skiptraced', methods=['POST'])
+@app.route("/process_skiptraced", methods=["POST"])
 @jwt_required()
 def process_skiptraced():
     uploaded_files = request.files.getlist("files")
@@ -253,15 +272,12 @@ def process_skiptraced():
             df["sql_last_update_date"] = upload_date
             df["sql_added_date"] = upload_date
             df.insert(df.columns.get_loc("list") + 1, "original_name", "")
-            # (Perform any additional column reordering/processing as needed)
-            # In this version, we rely on the original code’s processing.
+            # (Additional processing as in your original skiptraced code.)
             processed_files.append(df)
         if not processed_files:
             return jsonify({"message": "No valid files processed."}), 400
-        # For skiptraced data, we use psycopg2 executemany (as in your original code)
-        # because you mentioned that only the Format Data & Get Unique Rows process had the NAType issue.
         try:
-            conn = engine.raw_connection()
+            conn = get_db_connection()
             cur = conn.cursor()
             for df in processed_files:
                 columns = df.columns.tolist()
@@ -271,16 +287,15 @@ def process_skiptraced():
                 VALUES ({placeholders})
                 ON CONFLICT (property_street_address, property_city, owner_1_first_name, owner_1_last_name)
                 DO UPDATE SET
-                phone1 = EXCLUDED.phone1,
-                phone2 = EXCLUDED.phone2,
-                phone3 = EXCLUDED.phone3,
-                email1 = EXCLUDED.email1,
-                email2 = EXCLUDED.email2,
-                email3 = EXCLUDED.email3,
-                last_updated = EXCLUDED.last_updated;
+                    phone1 = EXCLUDED.phone1,
+                    phone2 = EXCLUDED.phone2,
+                    phone3 = EXCLUDED.phone3,
+                    email1 = EXCLUDED.email1,
+                    email2 = EXCLUDED.email2,
+                    email3 = EXCLUDED.email3,
+                    last_updated = EXCLUDED.last_updated;
                 """
                 data = [tuple(row) for row in df.itertuples(index=False)]
-                from psycopg2 import extras
                 extras.execute_batch(cur, insert_query, data, page_size=100)
                 conn.commit()
             cur.close()
@@ -295,5 +310,5 @@ def process_skiptraced():
     except Exception as e:
         return jsonify({"message": "An error occurred while processing the skiptraced data.", "error": str(e)}), 500
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
