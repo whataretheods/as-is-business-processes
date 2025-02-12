@@ -1,196 +1,206 @@
-from flask import Flask, request, jsonify, send_file
-from flask_cors import CORS
-from flask_jwt_extended import JWTManager, jwt_required, create_access_token, get_jwt_identity
+# backend/app.py
+import os
+import io
+import csv
+import tempfile
+import logging
+from datetime import datetime, timedelta, timezone
+
 import numpy as np
+import pandas as pd
 import bcrypt
 import psycopg2
 from psycopg2 import extras
-import pandas as pd
-from datetime import datetime, timedelta, timezone
-from database import get_db_connection
-import tempfile
-import csv
-import io
+from psycopg2.extras import execute_values  # For efficient bulk inserts
+from flask import Flask, request, jsonify, send_file
+from flask_cors import CORS
+from flask_jwt_extended import (
+    JWTManager, jwt_required, create_access_token, get_jwt_identity
+)
 from dotenv import load_dotenv
-import os
 
-# Load environment variables from .env file to access your own RDS database
+from database import get_db_connection
+
+# Load environment variables
 load_dotenv()
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": os.getenv('APP_FRONT_END_URL')}})
 
 # Configure JWT
-app.config['JWT_SECRET_KEY'] = os.getenv('JWT_KEY')  # Replace with your own secret key
-app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=2) # Set the token expiration time
+app.config['JWT_SECRET_KEY'] = os.getenv('JWT_KEY')
+app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=2)
 jwt = JWTManager(app)
 
-#This function checks the token's validity against the database
 @jwt.user_lookup_loader
 def custom_user_loader_callback(jwt_header, jwt_data):
     identity = jwt_data["sub"]
-
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("SELECT * FROM users WHERE username = %s", (identity,))
-    user = cur.fetchone()
-    cur.close()
-    conn.close()
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM users WHERE username = %s", (identity,))
+        user = cur.fetchone()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        logger.error(f"Error fetching user: {e}")
+        return None
 
     if user:
-        token = user[3] # Make sure token is the 4th column of your table
-        token_expiration = user[4] #Make sure token_expiration is the 5th column of your table
-
+        token = user[3]  # Adjust based on your table columns
+        token_expiration = user[4]
         if token_expiration:
             token_expiration = token_expiration.replace(tzinfo=timezone.utc)
-
         if token and token_expiration and token_expiration > datetime.now(timezone.utc):
             return {'username': identity}
     return None
 
-'''
-# Dummy user for demonstration purposes
-users = {
-    'admin': {'password': '$2a$12$nDec2tkyQ3IAcw8iNqxwD.8jX3lJoT8errspcsD7gSkTn5g3.p532'},  # Password: 'password'
-    'testuser': {'password': '$2b$12$testusertestusertestus.UjH7pAoLdqkpnD8Bx1qYd/djECJ5i'}  # Password: 'testpassword'
-}
-'''
-
 @app.route('/login', methods=['POST'])
 def login():
-    username = request.json.get('username', None)
-    password = request.json.get('password', None)
-    print(f"Received login request with username: {username} and password: {password}")
+    data = request.get_json()
+    username = data.get('username')
+    password = data.get('password')
+    logger.info(f"Login request for username: {username}")
 
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("SELECT * FROM users WHERE username = %s", (username,))
-    user = cur.fetchone()
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM users WHERE username = %s", (username,))
+        user = cur.fetchone()
+    except Exception as e:
+        logger.error(f"Database error during login: {e}")
+        return jsonify({'message': 'Database error.'}), 500
 
     if user and bcrypt.checkpw(password.encode('utf-8'), user[2].encode('utf-8')):
         access_token = create_access_token(identity=username)
-        token_expiration = datetime.utcnow() + app.config['JWT_ACCESS_TOKEN_EXPIRES']
-
-        cur.execute("UPDATE users SET token = %s, token_expiration = %s WHERE id = %s", (access_token, token_expiration, user[0]))
-
-        if cur.rowcount == 0: # Check to see if there is no token for the user, since the Update step above did not work.
-            cur.execute("INSERT INTO users (username, password, token, token_expiration) VALUES (%s, %s, %s, %s)", (username, user[2], access_token, token_expiration))
-
-        conn.commit()
-        cur.close()
-        conn.close()
-
+        token_expiration = datetime.now(timezone.utc) + app.config['JWT_ACCESS_TOKEN_EXPIRES']
+        try:
+            cur.execute(
+                "UPDATE users SET token = %s, token_expiration = %s WHERE id = %s",
+                (access_token, token_expiration, user[0])
+            )
+            if cur.rowcount == 0:
+                cur.execute(
+                    "INSERT INTO users (username, password, token, token_expiration) VALUES (%s, %s, %s, %s)",
+                    (username, user[2], access_token, token_expiration)
+                )
+            conn.commit()
+        except Exception as e:
+            logger.error(f"Error updating token: {e}")
+            conn.rollback()
+            return jsonify({'message': 'Error processing login.'}), 500
+        finally:
+            cur.close()
+            conn.close()
         return jsonify({'token': access_token}), 200
     else:
         cur.close()
         conn.close()
         return jsonify({'message': 'Invalid username or password'}), 401
 
-
-# Global variable to store the uniques_list DataFrame
+# Global variable to hold uniques_list DataFrame (if needed)
 uniques_list_df = None
 
 @app.route('/process_spreadsheets', methods=['POST'])
 @jwt_required()
 def process_spreadsheets():
-    # Get the current user's ID
     current_user_id = get_jwt_identity()
+    logger.info("Starting processing of spreadsheets.")
 
-    print("Processing spreadsheets...")
     uploaded_files = request.files.getlist('files')
     source_name = request.form.get('source_name')
     list_name = request.form.get('list_name')
 
-    print(f"Uploaded files: {len(uploaded_files)}")
-    print(f"Source Name: {source_name}")
-    print(f"List Name: {list_name}")
-
     if not uploaded_files:
         return jsonify({'message': 'No files uploaded.'}), 400
-
     if not source_name or not list_name:
         return jsonify({'message': 'Source name or list name not provided.'}), 400
 
     processed_files = []
-
     for file in uploaded_files:
-        df = pd.read_csv(file)
-        #df = df.astype(str)
+        try:
+            df = pd.read_csv(file, low_memory=False)
+        except Exception as e:
+            logger.error(f"Error reading CSV file: {e}")
+            return jsonify({'message': 'Error reading CSV file', 'error': str(e)}), 400
 
         if len(df.columns) != 70:
             return jsonify({'message': 'The spreadsheet must contain exactly 70 columns.'}), 400
 
+        # Insert metadata and standardize column names
         df.insert(0, 'source_name', source_name)
         df.insert(1, 'list', list_name)
         df.columns = [col.lower().replace(" ", "_").replace("%", "percent").replace("-", "") for col in df.columns]
-        column_renames = {
+        df.rename(columns={
             'property_county': 'county',
             'rank': 'rank_number',
             'tax_delinquent_year': 'tax_delinquency_year',
             'tax_delinquent_first_seen': 'tax_delinquent_first_seen',
             'tax_delinquent_last_updated': 'tax_delinquent_last_updated'
-        }
-        df.rename(columns=column_renames, inplace=True)
+        }, inplace=True)
 
-        # Replace empty strings with None (which will become NULL in SQL)
-        df.replace({"": None}, inplace=True)
-        df.replace({"NaN": None}, inplace=True)
-        
-        smallint_columns = ['tax_delinquency_year','tax_delinquency','prior_deed_transfer','preforeclosure','phantom','invol_lien',
-            'stack_count','rank_number','year_built','baths','beds','vacant'] 
- 
+        # Replace empty strings with None
+        df.replace({"": None, "NaN": None}, inplace=True)
+
+        # Convert columns to numeric types where needed
+        smallint_columns = ['tax_delinquency_year','tax_delinquency','prior_deed_transfer','preforeclosure',
+                            'phantom','invol_lien','stack_count','rank_number','year_built','baths','beds','vacant']
         for col in smallint_columns:
             if col in df.columns:
-                df[col] = df[col].astype(pd.Int64Dtype()) #converts the column values to integers and invalid or missing values to NaN
-                max_val = df[col].max()
-                min_val = df[col].min()
-                print(f"Column '{col}' max value: {max_val}")
-                print(f"Column '{col}' min value: {min_val}")
+                try:
+                    df[col] = df[col].astype(pd.Int64Dtype())
+                except Exception as e:
+                    logger.warning(f"Conversion error for column {col}: {e}")
 
-        integer_columns = ['low_property_avm','final_property_avm','high_property_avm','lot_size','sqft','sale_price','mortgage_past_due_amount','mortgage_unpaid_balance_amount']
-        
+        integer_columns = ['low_property_avm','final_property_avm','high_property_avm','lot_size','sqft',
+                           'sale_price','mortgage_past_due_amount','mortgage_unpaid_balance_amount']
         for col in integer_columns:
             if col in df.columns:
-                df[col] = df[col].astype(pd.Int64Dtype()) #converts the column values to integers and invalid or missing values to NaN
+                try:
+                    df[col] = df[col].astype(pd.Int64Dtype())
+                except Exception as e:
+                    logger.warning(f"Conversion error for column {col}: {e}")
 
-        date_columns = ['prediction_date', 'last_sale_date', 'first_seen', 'last_updated','invol_lien_first_seen','invol_lien_last_updated',
-            'phantom_first_seen','phantom_last_updated','mortgage_original_due_date','mortgage_default_date',
-            'notice_of_sale_auction_date','preforeclosure_first_seen','preforeclosure_last_updated','prior_deed_transfer_first_seen',
-            'prior_deed_transfer_last_updated','tax_delinquent_last_updated','vacancy_date','vacancy_first_seen','vacancy_last_updated',
-            'owner_last_exported_date','property_last_exported_date']  
-        for column in date_columns:
-            df[column] = pd.to_datetime(df[column], format='%Y-%m-%d', errors='coerce')
-            df[column] = df[column].apply(lambda x: x.strftime('%Y-%m-%d') if not pd.isna(x) else None)
-        
-        # Assuming `df` is your DataFrame
-        df = df.replace({pd.NA: None})
+        # Convert date columns
+        date_columns = ['prediction_date', 'last_sale_date', 'first_seen', 'last_updated',
+                        'invol_lien_first_seen','invol_lien_last_updated','phantom_first_seen',
+                        'phantom_last_updated','mortgage_original_due_date','mortgage_default_date',
+                        'notice_of_sale_auction_date','preforeclosure_first_seen','preforeclosure_last_updated',
+                        'prior_deed_transfer_first_seen','prior_deed_transfer_last_updated',
+                        'tax_delinquent_last_updated','vacancy_date','vacancy_first_seen','vacancy_last_updated',
+                        'owner_last_exported_date','property_last_exported_date']
+        for col in date_columns:
+            if col in df.columns:
+                try:
+                    df[col] = pd.to_datetime(df[col], format='%Y-%m-%d', errors='coerce')
+                    df[col] = df[col].dt.strftime('%Y-%m-%d')
+                except Exception as e:
+                    logger.warning(f"Date conversion error for column {col}: {e}")
+
         df = df.where(pd.notnull(df), None)
-
         processed_files.append(df)
 
     if not processed_files:
         return jsonify({'message': 'No valid files processed.'}), 400
 
     try:
-        print("Connecting to the database...")
         conn = get_db_connection()
         cur = conn.cursor()
-        
-        print("Processing and inserting data...")
-        
-        # Empty the audantic_raw_list table
+
+        # Clear raw data table
         cur.execute("TRUNCATE TABLE audantic_raw_list")
-        
-        # Concatenate all processed files into a single DataFrame
+
         combined_df = pd.concat(processed_files, ignore_index=True)
-
-        # Insert the combined data into the audantic_raw_list table
         columns = combined_df.columns.tolist()
-        placeholders = ','.join(['%s'] * len(columns))
-        insert_query = f"INSERT INTO audantic_raw_list ({','.join(columns)}) VALUES ({placeholders})"
-        cur.executemany(insert_query, combined_df.values.tolist())
+        insert_query = f"INSERT INTO audantic_raw_list ({','.join(columns)}) VALUES %s"
+        data_tuples = [tuple(x) for x in combined_df.to_numpy()]
+        execute_values(cur, insert_query, data_tuples, page_size=1000)
 
-        # Count unique rows
+        # Query unique rows count
         unique_count_query = """
         SELECT COUNT(*)
         FROM audantic_raw_list arl
@@ -198,18 +208,16 @@ def process_spreadsheets():
             SELECT 1
             FROM my_master_list mml
             WHERE arl.property_street_address = mml.property_street_address
-                AND arl.property_city = mml.property_city
-                AND arl.owner_1_first_name = mml.owner_1_first_name
-                AND mml.phone1 IS NOT NULL
+              AND arl.property_city = mml.property_city
+              AND arl.owner_1_first_name = mml.owner_1_first_name
+              AND mml.phone1 IS NOT NULL
         )
         """
         cur.execute(unique_count_query)
         unique_count = cur.fetchone()[0]
 
-        # Clear the unique_list table
+        # Recreate uniques_list table
         cur.execute("DROP TABLE IF EXISTS uniques_list")
-
-        # Generate a new unique_list table
         unique_list_query = """
         CREATE TABLE uniques_list AS
         SELECT *
@@ -218,48 +226,42 @@ def process_spreadsheets():
             SELECT 1
             FROM my_master_list
             WHERE audantic_raw_list.property_street_address = my_master_list.property_street_address
-                AND audantic_raw_list.property_city = my_master_list.property_city
-                AND audantic_raw_list.owner_1_first_name = my_master_list.owner_1_first_name
-                AND my_master_list.phone1 IS NOT NULL
+              AND audantic_raw_list.property_city = my_master_list.property_city
+              AND audantic_raw_list.owner_1_first_name = my_master_list.owner_1_first_name
+              AND my_master_list.phone1 IS NOT NULL
         )
         """
-
         cur.execute(unique_list_query)
 
-        # Store the uniques_list DataFrame
+        # Save the uniques_list data for download
         global uniques_list_df
         uniques_list_df = pd.read_sql_query("SELECT * FROM uniques_list", conn)
-
-        json_data = uniques_list_df.to_json(orient = 'records')
+        json_data = uniques_list_df.to_json(orient='records')
         binary_data = json_data.encode()
-
         cur.execute("INSERT INTO processed_files (username, file_data) VALUES (%s, %s)", (current_user_id, binary_data))
 
         conn.commit()
         cur.close()
         conn.close()
 
-        print("Spreadsheets processed successfully.")
+        logger.info("Spreadsheets processed successfully.")
         return jsonify({'message': 'Spreadsheets processed successfully.', 'unique_count': unique_count}), 200
 
     except psycopg2.errors.NumericValueOutOfRange as e:
-        print(f"Numeric value out of range error: {e}")
+        logger.error(f"Numeric value out of range: {e}")
         return jsonify({'message': 'Numeric value out of range error.', 'error': str(e)}), 400
     except psycopg2.DataError as e:
-        print(f"Data error occurred: {e.pgerror}")
+        logger.error(f"Data error: {e.pgerror}")
         return jsonify({'message': 'Data error occurred while processing the spreadsheets.', 'error': str(e.pgerror)}), 400
     except Exception as e:
-        print(f"An error occurred: {str(e)}")
+        logger.error(f"General error in processing spreadsheets: {e}")
         return jsonify({'message': 'An error occurred while processing the spreadsheets.', 'error': str(e)}), 500
 
 @app.route('/download_uniques_list', methods=['GET'])
 @jwt_required()
 def download_uniques_list():
+    current_user_id = get_jwt_identity()
     try:
-        # Get the current user's ID
-        current_user_id = get_jwt_identity()
-
-        # Fetch the data from the uniques_list table
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute("""
@@ -275,212 +277,199 @@ def download_uniques_list():
 
         if result:
             file_data = result[0]
-            json_data = file_data.tobytes().decode() # convert data type from RDS (stored as bytea) to JSON
+            # If stored as bytea, convert to JSON string
+            json_data = file_data.tobytes().decode() if hasattr(file_data, "tobytes") else file_data.decode()
             df = pd.read_json(json_data)
-
-            # Create a temporary file and write the DataFrame to it
-            with tempfile.NamedTemporaryFile(mode='w', delete=False) as temp_file:
+            with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv') as temp_file:
                 df.to_csv(temp_file, index=False)
                 temp_file_path = temp_file.name
-
             return send_file(temp_file_path, as_attachment=True, download_name='uniques_list.csv')
         else:
             return jsonify({'message': 'No processed file found for the user.'}), 404
 
     except Exception as e:
-        print(f"Error downloading uniques list: {str(e)}")
+        logger.error(f"Error downloading uniques list: {e}")
         return jsonify({'message': 'An error occurred while downloading the uniques list.', 'error': str(e)}), 500
-
 
 @app.route('/process_skiptraced', methods=['POST'])
 @jwt_required()
 def process_skiptraced():
-    print("Skitrace sheet process initiated")
+    logger.info("Starting processing of skiptraced data.")
     uploaded_files = request.files.getlist('files')
     skip_traced_date = request.form.get('skip_traced_date')
-    upload_date = str(datetime.now().date())
-    print(f"Uploaded files received {uploaded_files}, skiptraced date {skip_traced_date}")
+    upload_date = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+
     if not uploaded_files:
         return jsonify({'message': 'No files uploaded.'}), 400
-    
-    try:
-        processed_files = []
 
-        for file in uploaded_files:
-            df = pd.read_csv(file)
-            # Verify the number of columns is what we expect
-            num_col = len(df.columns)
-            if num_col != 91:
-                print(f"Number of columns is not what we expect. Should be 91 but is {num_col}")
-                continue
+    processed_files = []
+    for file in uploaded_files:
+        try:
+            df = pd.read_csv(file, low_memory=False)
+        except Exception as e:
+            logger.error(f"Error reading skiptraced CSV: {e}")
+            continue
+
+        num_cols = len(df.columns)
+        if num_cols != 91:
+            logger.warning(f"Expected 91 columns but got {num_cols}. Skipping file {file.filename}")
+            continue
+
+        # Standardize column names and perform modifications
+        df.columns = [col.lower().replace(" ", "_").replace("%", "percent").replace("-", "") for col in df.columns]
+        df.rename(columns={'full_address': 'full_skiptrace_address'}, inplace=True)
+        if 'has_duplicates' in df.columns:
+            df.drop(columns=['has_duplicates'], inplace=True)
+
+        df["last_skiptraced_date"] = skip_traced_date
+        df["sql_last_update_date"] = upload_date
+        df["sql_added_date"] = upload_date
+
+        # Insert original_name column after list column (if present)
+        insert_idx = df.columns.get_loc("list") + 1 if "list" in df.columns else 1
+        df.insert(insert_idx, "original_name", "")
+
+        // Move owner-related columns if available
+        const_owner_cols = ['owner_1_name', 'owner_1_first_name', 'owner_1_last_name',
+                              'owner_2_name', 'owner_2_first_name', 'owner_2_last_name']
+        if all(col in df.columns for col in const_owner_cols):
+            owner_data = df[const_owner_cols].fillna('')
+            df.drop(columns=const_owner_cols, inplace=True)
+            insert_index = df.columns.get_loc('original_name') + 1
+            for col in const_owner_cols:
+                df.insert(insert_index, col, owner_data[col])
+                insert_index += 1
+
+        if 'owner_1_first_name' in df.columns:
+            df.insert(df.columns.get_loc("owner_1_first_name") + 1, 'owner_1_middle_name', '')
+        if 'owner_2_first_name' in df.columns:
+            df.insert(df.columns.get_loc("owner_2_first_name") + 1, 'owner_2_middle_name', '')
+
+        if 'county' in df.columns:
+            county_col = df.pop('county')
+            if 'owner_2_last_name' in df.columns:
+                df.insert(df.columns.get_loc("owner_2_last_name") + 1, 'county', county_col)
             else:
+                df['county'] = county_col
 
-                # Modify column names
-                df.columns = [col.lower().replace(" ", "_").replace("%", "percent").replace("-", "") for col in df.columns]
+        if 'county' in df.columns:
+            df.insert(df.columns.get_loc("county") + 1, 'property_class', 0)
 
-                # Column specific modifications
-                df.rename(columns={'full_address': 'full_skiptrace_address'}, inplace=True)
-                df.drop(columns=['has_duplicates'], inplace=True)
+        // Insert disposition columns around phone columns
+        phone_fields = [
+            ("phone1", "phone1_cc_disposition", "phone1_sms_disposition"),
+            ("phone2_company", "phone2_cc_disposition", "phone2_sms_disposition"),
+            ("phone3_company", "phone3_cc_disposition", "phone3_sms_disposition")
+        ]
+        for base, cc, sms in phone_fields:
+            if base in df.columns:
+                base_idx = df.columns.get_loc(base)
+                df.insert(base_idx + 1, cc, "")
+                df.insert(base_idx + 2, sms, "")
 
-                # Add new columns with specified values at the end
-                df["last_skiptraced_date"] = skip_traced_date
-                df["sql_last_update_date"] = upload_date
-                df["sql_added_date"] = upload_date
+        // Move owner address details if available
+        const_addr_cols = ['owner_street_address', 'owner_city', 'owner_state', 'owner_zip_code']
+        if all(col in df.columns for col in const_addr_cols):
+            addr_data = df[const_addr_cols]
+            df.drop(columns=const_addr_cols, inplace=True)
+            insert_index = df.columns.get_loc('sql_added_date') + 1
+            for col in const_addr_cols:
+                df.insert(insert_index, col, addr_data[col])
+                insert_index += 1
 
-                df.insert(df.columns.get_loc("list")+1, "original_name", "")
+        if 'vacancy_description' in df.columns:
+            df.drop(columns=['vacancy_description'], inplace=True)
 
-                # Move specified owner-related columns
-                owner_columns = df[['owner_1_name', 'owner_1_first_name', 'owner_1_last_name', 'owner_2_name', 'owner_2_first_name', 'owner_2_last_name']]
-                owner_columns = owner_columns.fillna('')
-                owner_columnd = owner_columns.astype(str)
-                df.drop(columns=owner_columns.columns, inplace=True)
-                insert_index = df.columns.get_loc('original_name') + 1
-                for col in owner_columns.columns:
-                    df.insert(insert_index, col, owner_columns[col])
-                    insert_index += 1
+        // Standardize numeric columns
+        numeric_columns = ['equity_percent', 'tax_improvement_percent', 'discount']
+        for col in numeric_columns:
+            if col in df.columns:
+                df[col] = df[col].astype(pd.Float64Dtype()).fillna(0)
 
-                # Insert new columns
-                df.insert(df.columns.get_loc("owner_1_first_name")+1, 'owner_1_middle_name', '')
-                df.insert(df.columns.get_loc("owner_2_first_name")+1, 'owner_2_middle_name', '')
+        smallint_columns = ['age', 'beds', 'baths', 'year_built', 'rank_number', 'stack_count', 'invol_lien', 'phantom', 'preforeclosure', 'prior_deed_transfer', 'tax_delinquency', 'tax_delinquency_year', 'vacant']
+        for col in smallint_columns:
+            if col in df.columns:
+                df[col] = df[col].astype(pd.Int64Dtype()).fillna(0)
 
-                county_column = df.pop('county')
-                df.insert(df.columns.get_loc("owner_2_last_name")+1, 'county', county_column)
-                df.insert(df.columns.get_loc("county")+1, 'property_class', 0)
+        integer_columns = ['low_property_avm', 'final_property_avm', 'high_property_avm', 'lot_size', 'sqft', 'sale_price', 'mortgage_past_due_amount', 'mortgage_unpaid_balance_amount']
+        for col in integer_columns:
+            if col in df.columns:
+                df[col] = df[col].astype(pd.Int64Dtype()).fillna(0)
 
-                property_info_columns = df.loc[:, 'dob':'sql_added_date']
-                df.drop(columns=property_info_columns.columns, inplace=True)
-                df = pd.concat([df.iloc[:, :df.columns.get_loc("property_class")+1], property_info_columns, df.iloc[:, df.columns.get_loc("property_class")+1:]], axis=1)
+        // Convert date columns for skiptraced data
+        date_columns = ['phone1_lastreporteddate', 'phone2_lastreporteddate', 'phone3_lastreporteddate', 'last_skiptraced_date', 'last_sale_date', 'prediction_date', 'first_seen', 'last_updated', 'invol_lien_first_seen',
+                        'invol_lien_last_updated', 'phantom_first_seen', 'phantom_last_updated', 'mortgage_original_due_date', 'mortgage_default_date', 'notice_of_sale_auction_date', 'preforeclosure_first_seen',
+                        'preforeclosure_last_updated', 'prior_deed_transfer_first_seen', 'prior_deed_transfer_last_updated', 'tax_delinquent_first_seen', 'tax_delinquent_last_updated', 'vacancy_date', 'vacancy_first_seen',
+                        'vacancy_last_updated', 'property_last_exported_date', 'owner_last_exported_date']
+        for col in date_columns:
+            if col in df.columns:
+                try:
+                    df[col] = pd.to_datetime(df[col], format='%Y-%m-%d', errors='coerce')
+                    df[col] = df[col].dt.strftime('%Y-%m-%d')
+                except Exception as e:
+                    logger.warning(f"Error converting date column {col}: {e}")
 
-                # Insert dispositions
-                df.insert(df.columns.get_loc("phone1")+1, "phone1_cc_disposition", "")
-                df.insert(df.columns.get_loc("phone1_cc_disposition")+1, "phone1_sms_disposition", "")
-                df.insert(df.columns.get_loc("phone2_company")+1, "phone2_cc_disposition", "")
-                df.insert(df.columns.get_loc("phone2_cc_disposition")+1, "phone2_sms_disposition", "")
-                df.insert(df.columns.get_loc("phone3_company")+1, "phone3_cc_disposition", "")
-                df.insert(df.columns.get_loc("phone3_cc_disposition")+1, "phone3_sms_disposition", "")
-
-                # Move owner address details
-                owner_columns = df[['owner_street_address', 'owner_city', 'owner_state', 'owner_zip_code']]
-                df.drop(columns=owner_columns.columns, inplace=True)
-                insert_index = df.columns.get_loc('sql_added_date') + 1
-                for col in owner_columns.columns:
-                    df.insert(insert_index, col, owner_columns[col])
-                    insert_index += 1
-
-                # Delete vacancy_description
-                df.drop(columns=['vacancy_description'], inplace=True)
-
-                #df.insert(df.columns.get_loc("owner_last_exported_date")+1, "id", None)
-                # Standardize columns for PostgreSQL data types
-
-                # Replace empty strings with None (which will become NULL in SQL)
-               
-                print(f"{df.columns}")
-                numeric_columns = ['equity_percent', 'tax_improvement_percent', 'discount']
-                for col in numeric_columns:
-                   df[col] = df[col].astype(pd.Float64Dtype())
-                   df[col] = df[col].apply(lambda x: 0 if pd.isnull(x) or x == '' else x)
-
-                smallint_columns = ['age', 'beds', 'baths', 'year_built', 'rank_number', 'stack_count', 'invol_lien', 'phantom', 'preforeclosure', 'prior_deed_transfer', 'tax_delinquency', 'tax_delinquency_year', 'vacant']
-       	        for col in smallint_columns:
-                    if col in df.columns:
-                        df[col] = df[col].astype(pd.Int64Dtype()) #converts the column values to integers and invalid or missing values to NaN
-                        # Replace empty strings with None in the column
-                        df[col] = df[col].apply(lambda x: 0 if pd.isnull(x) or x == '' else x)
-
-                integer_columns = ['low_property_avm', 'final_property_avm', 'high_property_avm', 'lot_size', 'sqft', 'sale_price', 'mortgage_past_due_amount', 'mortgage_unpaid_balance_amount']
-                for col in integer_columns:
-                    if col in df.columns:
-                        df[col] = df[col].astype(pd.Int64Dtype()) #converts the column values to integers and invalid or missing values to NaN
-                        # Replace empty strings with None in the column
-                        df[col] = df[col].apply(lambda x: 0 if pd.isnull(x) or x == '' else x)
-
-                date_columns = ['phone1_lastreporteddate', 'phone2_lastreporteddate', 'phone3_lastreporteddate', 'last_skiptraced_date', 'last_sale_date', 'prediction_date', 'first_seen', 'last_updated', 'invol_lien_first_seen',
-                    'invol_lien_last_updated', 'phantom_first_seen', 'phantom_last_updated', 'mortgage_original_due_date', 'mortgage_default_date', 'notice_of_sale_auction_date', 'preforeclosure_first_seen', 
-                    'preforeclosure_last_updated', 'prior_deed_transfer_first_seen', 'prior_deed_transfer_last_updated', 'tax_delinquent_first_seen', 'tax_delinquent_last_updated', 'vacancy_date', 'vacancy_first_seen', 
-                    'vacancy_last_updated', 'property_last_exported_date', 'owner_last_exported_date']
-                for column in date_columns:
-                    df[column] = pd.to_datetime(df[column], format='%Y-%m-%d', errors='coerce')
-                    df[column] = df[column].apply(lambda x: x.strftime('%Y-%m-%d') if not pd.isna(x) else None)
+        other_text_columns = ['source_name', 'list', 'original_name', 'owner_1_name', 'owner_1_first_name', 'owner_1_middle_name', 'owner_1_last_name', 'owner_2_name', 'owner_2_first_name', 'owner_2_middle_name', 'owner_2_last_name', 'county', 'property_class', 'dob', 'full_skiptrace_address', 'phone1', 'phone1_cc_disposition', 'phone1_sms_disposition', 'phone1_type', 'phone1_company', 'phone2', 'phone2_type', 'phone2_company', 'phone2_cc_disposition', 'phone2_sms_disposition', 'phone3', 'phone3_type', 'phone3_company', 'phone3_cc_disposition', 'phone3_sms_disposition', 'email1', 'email2', 'email3', 'owner_street_address', 'owner_city', 'owner_state', 'owner_zip_code', 'property_street_address', 'property_city', 'property_state', 'property_zip_code', 'property_type', 'school_district', 'all_active_invol_liens', 'latest_invol_lien', 'preforeclosure_type', 'deed_transfer_type']
+        for col in other_text_columns:
+            if col in df.columns:
+                df[col] = df[col].astype(str).fillna('')
         
-                    #df[column] = df[column].dt.strftime('%Y-%m-%d')
-                    #df[column] = pd.to_datetime(df[column], errors='coerce')  # Converts to NaT where conversion fails
-                    #df[column] = df[column].where(pd.notnull(df[column]), None)  # Converts NaT to None
-                    #df[column] = df[column].where(df[column].notna(), None)
+        boolean_columns = ['owner_occupied', 'not_listed', 'active_lien']
+        for col in boolean_columns:
+            if col in df.columns:
+                df[col] = df[col].astype(bool)
+        
+        if len(df.columns) != 102:
+            logger.error(f"After modifications, expected 102 columns but got {len(df.columns)}")
+            return jsonify({'message': f'After modifications, the number of columns is not as expected: {len(df.columns)}'}), 400
+        
+        processed_files.append(df)
 
-                other_text_columns = ['source_name', 'list', 'original_name', 'owner_1_name', 'owner_1_first_name', 'owner_1_middle_name', 'owner_1_last_name', 'owner_2_name', 'owner_2_first_name', 'owner_2_middle_name', 'owner_2_last_name', 'county', 'property_class', 'dob', 'full_skiptrace_address', 'phone1', 'phone1_cc_disposition', 'phone1_sms_disposition', 'phone1_type', 'phone1_company', 'phone2', 'phone2_type', 'phone2_company', 'phone2_cc_disposition', 'phone2_sms_disposition', 'phone3', 'phone3_type', 'phone3_company', 'phone3_cc_disposition', 'phone3_sms_disposition', 'email1', 'email2', 'email3', 'owner_street_address', 'owner_city', 'owner_state', 'owner_zip_code', 'property_street_address', 'property_city', 'property_state', 'property_zip_code', 'property_type', 'school_district', 'all_active_invol_liens', 'latest_invol_lien', 'preforeclosure_type', 'deed_transfer_type']
-                for column in other_text_columns:
-                    df[column] = df[column].astype(str)
-                    df[column] = df[column].fillna('')
+    if not processed_files:
+        return jsonify({'message': 'No valid skiptraced files processed.'}), 400
 
-                boolean_columns = ['owner_occupied', 'not_listed', 'active_lien']
-                for column in boolean_columns:
-                    df[column] = df[column].astype(bool)
-                    df[column] = df[column].fillna('')
-
-                #df.replace({"NaN": None}, inplace=True)
-                # After all modifications, verify the number of columns again
-                if len(df.columns) != 102:
-                    return jsonify({'message': f'After modifications, the number of columns is not as expected: {len(df.columns)}'}), 400
-                else:
-                    processed_files.append(df)
-                
-                if not processed_files:
-                    return jsonify({'message': 'No valid files processed.'}), 400
-                
-                conn = get_db_connection()
-                cur = conn.cursor()
-                for df in processed_files:
-                    # Assuming columns is a list of column names
-                    columns = df.columns.tolist()
-                    placeholders = ', '.join(['%s'] * len(columns))  # Placeholder for each column
-
-                    # Basic INSERT INTO statement (you'll need to adjust for your ON CONFLICT logic)
-                    insert_query = f"""
-                    INSERT INTO my_master_list ({', '.join(columns)})
-                    VALUES ({placeholders})
-                    ON CONFLICT (property_street_address, property_city, owner_1_first_name, owner_1_last_name)
-                    DO UPDATE SET
-                    phone1 = EXCLUDED.phone1,
-                    phone2 = EXCLUDED.phone2,
-                    phone3 = EXCLUDED.phone3,
-                    email1 = EXCLUDED.email1,
-                    email2 = EXCLUDED.email2,
-                    email3 = EXCLUDED.email3,
-                    last_updated = EXCLUDED.last_updated;
-                    """
-
-                    # Prepare data for insertion; ensure it's a list of tuples corresponding to each row
-                    data = [tuple(row) for row in df.itertuples(index=False)]
-
-                    try:
-                        with conn.cursor() as cur:
-                            # Execute the parameterized query using execute_batch for bulk operation
-                            extras.execute_batch(cur, insert_query, data, page_size=100)
-                        conn.commit()
-                    except psycopg2.errors.UniqueViolation:
-                        conn.rollback()
-                        print("Duplicate key violation encountered. Skipping the insertion of duplicate records.")
-                    except psycopg2.errors.InFailedSqlTransaction:
-                        conn.rollback()
-                        print("Transaction failed. Rolling back the changes.")
-                    except Exception as e:
-                        conn.rollback()
-                        print(f"An error occurred while merging the data: {str(e)}")
-                        raise
-
-                cur.close()
-                conn.close()
-
-                return jsonify({
-                    'message': 'Skiptraced data processed and merged successfully.',
-                    'standardization': 'Successful',
-                    'mergeStatus': 'Completed'
-                }), 200
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        for df in processed_files:
+            columns = df.columns.tolist()
+            insert_query = f"""
+            INSERT INTO my_master_list ({', '.join(columns)})
+            VALUES %s
+            ON CONFLICT (property_street_address, property_city, owner_1_first_name, owner_1_last_name)
+            DO UPDATE SET
+                phone1 = EXCLUDED.phone1,
+                phone2 = EXCLUDED.phone2,
+                phone3 = EXCLUDED.phone3,
+                email1 = EXCLUDED.email1,
+                email2 = EXCLUDED.email2,
+                email3 = EXCLUDED.email3,
+                last_updated = EXCLUDED.last_updated;
+            """
+            data_tuples = [tuple(x) for x in df.to_numpy()]
+            try:
+                execute_values(cur, insert_query, data_tuples, page_size=100)
+                conn.commit()
+            except psycopg2.errors.UniqueViolation as e:
+                conn.rollback()
+                logger.warning(f"Unique violation: {e}")
+            except psycopg2.errors.InFailedSqlTransaction as e:
+                conn.rollback()
+                logger.error(f"SQL transaction error: {e}")
+            except Exception as e:
+                conn.rollback()
+                logger.error(f"Error merging skiptraced data: {e}")
+                raise
+        cur.close()
+        conn.close()
+        return jsonify({
+            'message': 'Skiptraced data processed and merged successfully.',
+            'standardization': 'Successful',
+            'mergeStatus': 'Completed'
+        }), 200
     except Exception as e:
-        print(f"An error occurred: {str(e)}")
+        logger.error(f"General error in processing skiptraced data: {e}")
         return jsonify({'message': 'An error occurred while processing the skiptraced data.', 'error': str(e)}), 500
-
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
