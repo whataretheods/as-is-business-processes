@@ -19,10 +19,13 @@ from dotenv import load_dotenv
 
 from database import get_db_connection
 
+# Import NAType explicitly from Pandas internals.
+from pandas._libs.missing import NAType
+
 # Load environment variables
 load_dotenv()
 
-# Configure logging (set to DEBUG for maximum detail)
+# Configure logging (DEBUG level for full detail)
 logging.basicConfig(
     level=logging.DEBUG,
     format="%(asctime)s %(levelname)s [%(name)s:%(lineno)d] %(message)s",
@@ -41,19 +44,20 @@ jwt = JWTManager(app)
 def convert_value(x):
     """
     Convert a value to a native Python type.
-    - If the value is exactly pd.NA or its type name is 'NAType', return None.
+    - If x is an instance of NAType (i.e. a Pandas missing value), return None.
     - If pd.isna(x) is True, return None.
-    - If x is a numpy scalar, return its native Python value.
+    - If x is a NumPy scalar, return its native Python value via .item().
     - Otherwise, return x unchanged.
     """
-    if x is pd.NA or type(x).__name__ == 'NAType' or pd.isna(x):
+    if isinstance(x, NAType):
         return None
-    try:
-        # If x is a numpy scalar, x.item() returns a native type.
-        if isinstance(x, np.generic):
+    if pd.isna(x):
+        return None
+    if isinstance(x, np.generic):
+        try:
             return x.item()
-    except Exception as e:
-        logger.debug(f"Error converting value {x}: {e}")
+        except Exception as e:
+            logger.debug(f"Error converting numpy scalar {x}: {e}")
     return x
 
 @jwt.user_lookup_loader
@@ -71,7 +75,7 @@ def custom_user_loader_callback(jwt_header, jwt_data):
         return None
 
     if user:
-        token = user[3]  # Adjust index if needed
+        token = user[3]  # Adjust index as needed
         token_expiration = user[4]
         if token_expiration:
             token_expiration = token_expiration.replace(tzinfo=timezone.utc)
@@ -222,20 +226,17 @@ def process_spreadsheets():
         logger.debug(f"Combined DF dtypes:\n{combined_df.dtypes}")
         logger.debug(f"Combined DF shape: {combined_df.shape}")
 
-        # Instead of using .values, iterate over DataFrame rows with iterrows()
-        data_tuples = []
-        for idx, row in combined_df.iterrows():
-            converted_row = tuple(convert_value(x) for x in row)
-            data_tuples.append(converted_row)
+        # Convert entire DataFrame cells to native Python types:
+        # First, force object dtype and replace any pd.NA/np.nan with None
+        combined_df = combined_df.astype(object).replace({pd.NA: None, np.nan: None})
+        # Now iterate over rows and use convert_value for each cell
+        data_tuples = [tuple(convert_value(x) for x in row) for row in combined_df.values]
 
-        # Log the first sample row for debugging
+        # Log a sample row for debugging
         if data_tuples:
             logger.debug(f"Sample row after conversion: {data_tuples[0]}")
             for i, val in enumerate(data_tuples[0]):
-                if val is None:
-                    logger.debug(f"Row 0, Column '{combined_df.columns[i]}' is None")
-                else:
-                    logger.debug(f"Row 0, Column '{combined_df.columns[i]}' type: {type(val)}")
+                logger.debug(f"Row 0, Column '{combined_df.columns[i]}' value: {val} (type: {type(val)})")
 
         columns = combined_df.columns.tolist()
         insert_query = f"INSERT INTO audantic_raw_list ({','.join(columns)}) VALUES %s"
