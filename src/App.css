@@ -27,7 +27,7 @@
 .app-container {
   display: flex;
   flex-direction: row;
-  min-height: 100vh; /* Ensure full vertical height */
+  min-height: 100vh;
 }
 
 .App-link {
@@ -71,50 +71,41 @@
 }
 
 input[type="text"],
-input[type="username"] {
-  padding: 8px 8px 8px 15px;
-  margin-top: 5px;
-  border: 1px solid #ccc;
-  border-radius: 20px;
-  width: 100%; /* Makes input take the full width of the form */
-}
-
-input[type="text"],
+input[type="username"],
 input[type="password"] {
   padding: 8px 8px 8px 15px;
   margin-top: 5px;
   border: 1px solid #ccc;
   border-radius: 20px;
-  width: 100%; /* Makes input take the full width of the form */
+  width: 100%;
 }
 
 .navigation {
-  width: 250px; /* Adjust based on your navigation width */
-  flex-shrink: 0; /* Prevents the navigation from shrinking */
-  /* Your existing styles for background, padding, etc. */
+  width: 250px;
+  flex-shrink: 0;
 }
 
 .sidebar {
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  background-color: #1a1a1a; /* Replace with actual color from mockup */
+  background-color: #1a1a1a;
   height: 100%;
-  padding: 20px; /* Adjust as needed */
-  position: fixed; /* Ensure it stays in place on scroll */
-  transition: background-color 0.3s; /* Smooth background color transition */
+  padding: 20px;
+  position: fixed;
+  transition: background-color 0.3s;
 }
 
 .sidebar a {
-  padding: 10px; /* Increase clickable area and space */
-  display: block; /* Make each link full width for padding to take effect */
-  color: white; /* Text color */
-  text-decoration: none; /* Remove underline */
-  margin-bottom: 5px; /* Space between links */
+  padding: 10px;
+  display: block;
+  color: white;
+  text-decoration: none;
+  margin-bottom: 5px;
 }
 
 .sidebar a:hover {
-  background-color: #333; /* Replace with actual color from mockup */
+  background-color: #333;
 }
 
 .sidebar-links a {
@@ -126,11 +117,11 @@ input[type="password"] {
 }
 
 .sidebar-links a:hover {
-  background-color: #333; /* Adjust hover color as needed */
+  background-color: #333;
 }
 
 .logout-bottom {
-  margin-top: auto; /*pushes to the bottom */
+  margin-top: auto;
   cursor: pointer;
   color: white;
   text-align: left;
@@ -138,29 +129,25 @@ input[type="password"] {
   margin-bottom: auto;
 }
 
-/* Main Content */
 .main-content {
-  flex-grow: 1; /* Takes up the remaining space */
-  padding: 10px; /* Adjust as needed */
+  flex-grow: 1;
+  padding: 10px;
 }
 
-/* Drop Zone style */
 .dropzone {
   align-items: center;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  border: 2px dashed #999; /* Replace with actual color from mockup */
+  border: 2px dashed #999;
   padding: 10px;
-  margin-bottom: 5px; /* Separate from other elements */
+  margin-bottom: 5px;
   border-radius: 20px;
 }
 
 .dropzone:hover {
-  background-color: #f5f5f5; /* Light grey to indicate interactivity, replace with actual color from mockup */
+  background-color: #f5f5f5;
 }
-
-/* Input fields and buttons */
 
 .inputs-container {
   display: flex;
@@ -175,54 +162,48 @@ input[type="file"] {
   display: flex;
   justify-content: space-between;
   flex-direction: column;
-  max-width: 400px; /* Space between inputs */
+  max-width: 400px;
   margin-top: 20px;
 }
 
 button {
-  background-color: #007bff; /* Bootstrap primary button color for example, replace with actual color from mockup */
+  background-color: #007bff;
   color: white;
   padding: 10px 15px;
   border: none;
   border-radius: 15px;
-  margin: 10px; /* Space between buttons */
-  cursor: pointer; /* Indicate it's clickable */
+  margin: 10px;
+  cursor: pointer;
 }
 
 button:hover {
-  background-color: #0056b3; /* Darken on hover, replace with actual color from mockup */
+  background-color: #0056b3;
 }
-
-/* Step Containers */
 
 .step-container {
   text-align: center;
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); /* Subtle shadow, adjust as needed */
-  border-radius: 20px; /* Rounded corners */
-  margin: 20px 30px 20px 20px; /* Top and bottom margin */
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  border-radius: 20px;
+  margin: 20px 30px 20px 20px;
   padding: 20px;
   min-height: 250px;
   max-width: 700px;
 }
 
-/* Headers and Style */
-
 .step-title {
   font-weight: bold;
   font-size: 100%;
-  background-color: #e9ecef; /* Bootstrap light grey for example, replace with actual color from mockup */
+  background-color: #e9ecef;
   padding: 10px;
-  border-radius: 20px 20px 0 0; /* If the headers have separate boxes */
-  margin: -20px -20px 20px -20px; /* Align with the step-container padding */
+  border-radius: 20px 20px 0 0;
+  margin: -20px -20px 20px -20px;
 }
-
-/* Responsive Design */
 
 @media (max-width: 768px) {
   .sidebar {
-    width: 100%; /* Full width on small screens */
+    width: 100%;
     max-width: 180px;
-    position: static; /* Stack on top instead of fixed */
+    position: static;
   }
 
   .navigation {
@@ -231,11 +212,6 @@ button:hover {
   }
 
   .main-content {
-    padding: 25px; /* Adjust padding on smaller screens */
+    padding: 25px;
   }
-
-  /* Other responsive adjustments as needed */
 }
-
-
-
